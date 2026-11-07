@@ -500,7 +500,7 @@ func Run(ctx context.Context, s sys.System, f *facts.Facts, o Options, logf Logf
 }
 
 func noneNote(f *facts.Facts, p probeResult) string {
-	machine := strings.TrimSpace(f.DMI.Vendor + " " + f.DMI.Product)
+	machine := f.MachineName()
 	if machine == "" {
 		machine = "this machine"
 	}

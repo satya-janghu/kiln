@@ -33,10 +33,24 @@ type Action interface {
 func RunAll(ctx context.Context, s sys.System, acts []Action) error {
 	for _, a := range acts {
 		if err := a.Do(ctx, s); err != nil {
-			return fmt.Errorf("%s: %w", a.Describe(), err)
+			return fmt.Errorf("%s: %w", Short(a.Describe()), err)
 		}
 	}
 	return nil
+}
+
+// Short trims an action description for error messages: the first clause, at
+// most 90 characters, so the summary leads with the actual error (seen on the
+// HP test machine: whole multi-line descriptions repeated before each error).
+func Short(desc string) string {
+	if i := strings.IndexAny(desc, ":;("); i > 20 {
+		desc = desc[:i]
+	}
+	desc = strings.TrimSpace(desc)
+	if r := []rune(desc); len(r) > 90 {
+		desc = string(r[:89]) + "…"
+	}
+	return desc
 }
 
 // AptUpdate refreshes package lists.

@@ -4,6 +4,7 @@ package facts
 
 import (
 	"net/netip"
+	"strings"
 
 	"github.com/satya-janghu/kiln/internal/sys"
 )
@@ -134,6 +135,39 @@ func (f *Facts) NVIDIA() []PCIDevice {
 // IsLenovoThinkPad reports a ThinkPad.
 func (f *Facts) IsThinkPad() bool {
 	return f.DMI.Vendor == "LENOVO" && (contains(f.DMI.Version, "ThinkPad") || contains(f.DMI.Family, "ThinkPad"))
+}
+
+// placeholderDMI are firmware filler strings that carry no information.
+var placeholderDMI = []string{"type1productconfigid", "to be filled by o.e.m.", "default string", "system product name", "system version", "not applicable", "none", "0123456789"}
+
+func isPlaceholder(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	for _, p := range placeholderDMI {
+		if v == p {
+			return true
+		}
+	}
+	return false
+}
+
+// MachineName is a readable machine name: vendor (unless the product already
+// starts with it), product, and the version when it's informative.
+func (f *Facts) MachineName() string {
+	parts := []string{}
+	product := strings.TrimSpace(f.DMI.Product)
+	if v := strings.TrimSpace(f.DMI.Vendor); v != "" && !isPlaceholder(v) && !strings.HasPrefix(strings.ToLower(product), strings.ToLower(v)) {
+		parts = append(parts, v)
+	}
+	if product != "" && !isPlaceholder(product) {
+		parts = append(parts, product)
+	}
+	if v := strings.TrimSpace(f.DMI.Version); v != "" && !isPlaceholder(v) && !strings.Contains(product, v) {
+		parts = append(parts, v)
+	}
+	if len(parts) == 0 {
+		return "this machine"
+	}
+	return strings.Join(parts, " ")
 }
 
 // LANSummary returns LAN subnets as strings.

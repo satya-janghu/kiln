@@ -520,6 +520,21 @@ This **reverses** your brief's "key-only auth when keys exist, no root login", a
 
 Field observations so far are in debian13-notes.md, "Field observations".
 
+### D47 · 2026-11-07 · Field-test fixes (forced)
+
+**Status: forced.** Each fix is the only way to meet the existing catalog text on real hardware; none changes what kiln does, only how reliably it does it. Evidence is in debian13-notes.md, "Field observations".
+
+- **firewall:** `closeOldSSHPorts` read SSH options through the firewall step's option view and panicked ("option ssh.extra_ports was not declared"). It now uses a firewall view of the same environment.
+- **network-migration:**
+  - restart NetworkManager instead of `nmcli connection reload`, because reload left the device unmanaged;
+  - wait for the device to become available (and, for Wi-Fi, for scan results) before `nmcli --wait 90 connection up <profile> ifname <iface>`;
+  - after an undo, wait for connectivity again, so the next step doesn't fail with "Network is unreachable".
+- **network-migration, IPv6:** with no `inet6` stanza, IPv6 was mapped to `ignore`, but ifupdown's dhcpcd also does IPv6. The box lost its IPv6 addresses. The profile now gets `method=auto` with dhcpcd's SLAAC style (`stable-privacy` for `slaac private`, else `eui64`, in line with P13), DUID and IAID, unless `dhcpcd.conf` has `ipv4only` or `noipv6`.
+- **facts:**
+  - LAN subnets skip /32 and /128 host routes;
+  - `MachineName()` drops a vendor repeated in the product name and DMI placeholders such as `Type1ProductConfigId`, and the facts screen no longer adds the version back.
+- **Readability:** step failures show the action's short description instead of the whole wrapped error chain (`action.Short`).
+
 ## Proposals from the second verification pass
 
 **Status:** you accepted all of these on 2026-11-07 as written (the "current text" option), except P1 and P14, which D38 replaces. They're kept here as a record of the choices and the alternatives.
@@ -667,6 +682,18 @@ These are what Cockpit's networking, storage and updates pages need, and they pu
 - **A.** Keep them (current text).
 - **B.** Install only `cockpit-networkmanager`.
 - **C.** Choose per page.
+
+## Proposals from the field test
+
+### P18 · Undo brings the interface back through `ifup@<iface>.service` (step 6)
+
+**Status: proposed.** Not implemented.
+
+When a migration fails its check, the undo runs `ifup <iface>` from kiln's process. That works (field test run 2), but wpa_supplicant and dhcpcd then live in kiln's `kiln-run-*.scope` instead of `ifup@<iface>.service`, where Debian puts them at boot. They survive kiln exiting, but anything that stops that scope would take the network down, and `systemctl status ifup@<iface>` won't show them.
+
+**Options:**
+- **A.** For `allow-hotplug` interfaces, run `systemctl start ifup@<iface>.service`; for `auto` ones, `systemctl restart networking.service`. The daemons end up where they are at boot. (Recommended.)
+- **B.** Keep the plain `ifup <iface>` (current code).
 
 ## Open questions
 

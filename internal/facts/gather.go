@@ -420,7 +420,9 @@ func LANSubnets(nics []NIC) []netip.Prefix {
 		}
 		for _, a := range n.Addrs {
 			ok := (a.Addr().Is4() && a.Addr().IsPrivate()) || ula.Contains(a.Addr())
-			if !ok {
+			// A single-address prefix (/32, /128, e.g. a DHCPv6 lease) isn't a
+			// subnet; the on-link prefix it belongs to is listed separately.
+			if !ok || a.Bits() == a.Addr().BitLen() {
 				continue
 			}
 			p := a.Masked()

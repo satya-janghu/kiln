@@ -132,7 +132,7 @@ func FactsText(a *app.App) string {
 	var b strings.Builder
 	w := func(k, v string) { fmt.Fprintf(&b, "%-14s %s\n", k, v) }
 	w("System", strings.TrimSpace(f.OS.Pretty+" "+f.Arch+", kernel "+f.Kernel))
-	w("Machine", strings.TrimSpace(f.DMI.Vendor+" "+f.DMI.Product+" "+f.DMI.Version))
+	w("Machine", f.MachineName())
 	kind := "desktop"
 	if f.Laptop {
 		kind = "laptop"

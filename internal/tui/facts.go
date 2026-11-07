@@ -89,13 +89,7 @@ type factRow struct {
 func (m *model) factRows() []factRow {
 	f := m.a.Facts
 	var rows []factRow
-	machine := joinNonEmpty(" ", f.DMI.Vendor, f.DMI.Product)
-	if f.DMI.Version != "" && !strings.Contains(machine, f.DMI.Version) {
-		machine += " (" + f.DMI.Version + ")"
-	}
-	if machine == "" {
-		machine = "unknown"
-	}
+	machine := f.MachineName() // already adds the version when it's informative
 	kind := "Desktop"
 	if f.Laptop {
 		kind = "Laptop"
@@ -272,7 +266,7 @@ func (m *model) allFacts() []string {
 		}
 	}
 	add("System", joinNonEmpty(" ", f.OS.Pretty, f.Arch)+", kernel "+f.Kernel)
-	add("Machine", joinNonEmpty(" ", f.DMI.Vendor, f.DMI.Product, f.DMI.Version))
+	add("Machine", f.MachineName())
 	add("Family / board", joinNonEmpty(" / ", f.DMI.Family, f.DMI.Board))
 	add("Chassis type", fmt.Sprintf("%d (laptop: %s)", f.DMI.ChassisType, yesNo(f.Laptop)))
 	add("CPU", fmt.Sprintf("%s (%s), %d cores", f.CPU.Model, f.CPU.Vendor, f.CPU.Cores))

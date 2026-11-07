@@ -542,10 +542,16 @@ func init() { ssh.FirewallSync = closeOldSSHPorts }
 // committed: it closes, in kiln-lan and public, the SSH ports sshd used before
 // the change (before) but no longer uses, unless they are extra open ports.
 // It is snapshotted, checked and reverted like the firewall step itself.
-func closeOldSSHPorts(ctx context.Context, s sys.System, env *step.Env, before []int) error {
-	if s.DryRun() || !env.All.IsEnabled("firewall") || !isActive(ctx, s) {
+func closeOldSSHPorts(ctx context.Context, s sys.System, sshEnv *step.Env, before []int) error {
+	if s.DryRun() || !sshEnv.All.IsEnabled("firewall") || !isActive(ctx, s) {
 		return nil
 	}
+	// Called from the ssh step: read the firewall's own options, not ssh's
+	// (found on the HP test machine, 2026-11-07: "option ssh.extra_ports was
+	// not declared").
+	fwEnv := *sshEnv
+	fwEnv.Opts = sshEnv.All.For("firewall")
+	env := &fwEnv
 	w := desired(ctx, env) // sshd now reports only the ports it uses after the change
 	open := w.publicPorts()
 	var stale []string

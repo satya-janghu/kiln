@@ -12,6 +12,7 @@ import (
 	"net"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -233,7 +234,7 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		}
 		migrating[t.name] = true
 		acts = append(acts, action.Custom{
-			Desc: fmt.Sprintf("move %s to NetworkManager: write %s (0600, %s, autoconnect off for now), load it, ifdown %s, comment out its stanzas in %s, reload NetworkManager, stop any leftover DHCP client, let NetworkManager manage %s and bring %s up (nmcli --wait 90); then check link, address, default route, DNS and HTTPS to deb.debian.org for up to %s, turn autoconnect on if that passes, and put %s back on ifupdown if it fails",
+			Desc: fmt.Sprintf("move %s to NetworkManager: write %s (0600, %s, autoconnect off for now), load it, ifdown %s, comment out its stanzas in %s, restart NetworkManager, stop any leftover DHCP client, let NetworkManager manage %s and bring %s up (nmcli --wait 90); then check link, address, default route, DNS and HTTPS to deb.debian.org for up to %s, turn autoconnect on if that passes, and put %s back on ifupdown if it fails",
 				t.name, keyfilePath(t.name), p.summary, t.name, strings.Join(t.files, ", "), t.name, profileName(t.name), netDeadline, t.name),
 			K:  action.Commands,
 			Fn: func(ctx context.Context, s sys.System) error { return migrate(ctx, s, env, t, p) },
@@ -301,6 +302,15 @@ func migrate(ctx context.Context, s sys.System, env *step.Env, t target, p profi
 			env.Notes.Add("The network change for %s couldn't be undone. To recover by hand: copy %s to %s and run `systemctl restart networking`.", name, sys.BackupPath(Interfaces), Interfaces)
 			return fmt.Errorf("%w; putting %s back on ifupdown also failed: %w", cause, name, uerr)
 		}
+		// ifup returns before DHCP (and, on Wi-Fi, association) has finished. Wait
+		// for the network to work again, so the next step doesn't fail on a
+		// network that's still coming back (D41: "started" isn't "ready").
+		if !s.DryRun() {
+			env.Say("waiting for %s to come back on ifupdown", name)
+			if werr := revert.Poll(ctx, netDeadline, 3*time.Second, func() error { return netCheck(ctx, s, name, env.Facts.DefaultIface == name) }); werr != nil {
+				env.Notes.Add("%s was put back on ifupdown but the network hadn't come back after %s; later steps may fail. Check `ip addr show %s`.", name, netDeadline, name)
+			}
+		}
 		return fmt.Errorf("%w. %s was put back on ifupdown", cause, name)
 	}
 	run := func(timeout time.Duration, args ...string) error {
@@ -337,8 +347,13 @@ func migrate(ctx context.Context, s sys.System, env *step.Env, t target, p profi
 			return undo(err)
 		}
 	}
-	// 6.3 Let the ifupdown plugin recompute unmanaged devices.
-	if err := run(time.Minute, "nmcli", "connection", "reload"); err != nil {
+	// 6.3 Make NetworkManager drop the interface from its unmanaged list. A
+	// `nmcli connection reload` re-reads /etc/network/interfaces but doesn't
+	// re-evaluate a device NM marked unmanaged at startup (seen on the HP test
+	// machine: still "10 (unmanaged)" after reload + `managed yes`). The Debian
+	// wiki's documented procedure is: comment out the stanza, create the NM
+	// connection, restart NetworkManager (wiki.debian.org/NetworkManager).
+	if err := run(2*time.Minute, "systemctl", "restart", "NetworkManager.service"); err != nil {
 		return undo(err)
 	}
 	// 6.4 No DHCP client may keep running for the interface.
@@ -347,7 +362,16 @@ func migrate(ctx context.Context, s sys.System, env *step.Env, t target, p profi
 	if err := run(time.Minute, "nmcli", "device", "set", name, "managed", "yes"); err != nil {
 		return undo(err)
 	}
-	if err := run(2*time.Minute, "nmcli", "--wait", "90", "connection", "up", prof); err != nil {
+	// NetworkManager makes a newly managed device available asynchronously, and a
+	// Wi-Fi device must also have scanned and seen its network; activating
+	// before that fails with "No suitable device found" (seen on the HP test
+	// machine, 2026-11-07). Wait for the device, then activate on it by name.
+	if !s.DryRun() {
+		if err := waitDeviceReady(ctx, s, name, t.ssid != ""); err != nil {
+			return undo(err)
+		}
+	}
+	if err := run(2*time.Minute, "nmcli", "--wait", "90", "connection", "up", prof, "ifname", name); err != nil {
 		return undo(err)
 	}
 	if s.DryRun() {
@@ -464,4 +488,40 @@ func netCheck(ctx context.Context, s sys.System, iface string, hadDefault bool) 
 		return fmt.Errorf("HTTPS to deb.debian.org fails: %w", err)
 	}
 	return nil
+}
+
+// waitDeviceReady waits until NetworkManager reports the device as available
+// (not unmanaged/unavailable) and, for Wi-Fi, until a scan shows an SSID, so
+// `nmcli connection up` can succeed.
+func waitDeviceReady(ctx context.Context, s sys.System, name string, wifi bool) error {
+	state := func() string {
+		r, _ := s.Query(ctx, sys.Cmd{Name: "nmcli", Args: []string{"-t", "-g", "GENERAL.STATE", "device", "show", name}})
+		return strings.TrimSpace(r.Stdout)
+	}
+	err := revert.Poll(ctx, 45*time.Second, time.Second, func() error {
+		st := state()
+		// NM device states: 10 unmanaged, 20 unavailable, 30 disconnected and
+		// higher can activate a profile (nm-dbus-interface NMDeviceState).
+		code, _, _ := strings.Cut(st, " ")
+		if n, err := strconv.Atoi(code); err == nil && n >= 30 {
+			return nil
+		}
+		return fmt.Errorf("NetworkManager reports %s as %q", name, st)
+	})
+	if err != nil {
+		return fmt.Errorf("NetworkManager didn't make %s available: %w", name, err)
+	}
+	if !wifi {
+		return nil
+	}
+	_, _ = s.Run(ctx, sys.Cmd{Name: "nmcli", Args: []string{"device", "wifi", "rescan", "ifname", name}, Timeout: time.Minute})
+	return revert.Poll(ctx, 45*time.Second, 2*time.Second, func() error {
+		r, _ := s.Query(ctx, sys.Cmd{Name: "nmcli", Args: []string{"-t", "-f", "SSID", "device", "wifi", "list", "ifname", name, "--rescan", "no"}})
+		for _, l := range strings.Split(r.Stdout, "\n") {
+			if strings.TrimSpace(l) != "" {
+				return nil
+			}
+		}
+		return fmt.Errorf("no Wi-Fi networks visible on %s yet", name)
+	})
 }

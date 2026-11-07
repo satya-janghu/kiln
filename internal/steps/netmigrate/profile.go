@@ -182,6 +182,58 @@ func dhcpcdSettings(s sys.System, iface string) (useMAC bool, clientID, iaid str
 	return useMAC, clientID, iaid
 }
 
+// dhcpcdIPv6 reports whether dhcpcd configures IPv6 on iface and which NM
+// ipv6.addr-gen-mode matches its SLAAC addresses. ifupdown runs plain
+// `dhcpcd <iface>` (no -4; ifupdown 0.8.44 inet.defn), so dhcpcd does IPv6
+// unless dhcpcd.conf says `ipv4only` or `noipv6` (dhcpcd.conf(5)). `slaac
+// private` (Debian's shipped dhcpcd.conf) makes RFC 7217 addresses, NM's
+// "stable-privacy"; without it dhcpcd uses the hardware address, NM's "eui64"
+// (dhcpcd 10.1.0 src/if-options.c O_SLAAC). Scoping follows dhcpcdSettings.
+func dhcpcdIPv6(s sys.System, iface string) (on bool, addrGen string) {
+	on, addrGen = true, "eui64"
+	b, err := s.ReadFile("/etc/dhcpcd.conf")
+	if err != nil {
+		return on, addrGen
+	}
+	inScope := true
+	for _, l := range strings.Split(string(b), "\n") {
+		f := strings.Fields(strings.TrimSpace(l))
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		switch f[0] {
+		case "interface":
+			inScope = len(f) > 1 && f[1] == iface
+			continue
+		case "profile", "ssid":
+			inScope = false
+			continue
+		}
+		if !inScope {
+			continue
+		}
+		switch f[0] {
+		case "ipv4only", "noipv6":
+			on = false
+		case "slaac":
+			addrGen = "eui64"
+			if len(f) > 1 && (f[1] == "private" || f[1] == "stableprivate" || f[1] == "stable") {
+				addrGen = "stable-privacy"
+			}
+		}
+	}
+	return on, addrGen
+}
+
+// iaidOf returns the IAID inside an "ff:<IAID>:<DUID>" client ID, or "".
+func iaidOf(clientID string) string {
+	p := strings.Split(clientID, ":")
+	if len(p) < 6 || p[0] != "ff" {
+		return ""
+	}
+	return strings.Join(p[1:5], ":")
+}
+
 // iaidBytes renders an IAID as 4 colon-hex bytes: decimal (network order) or aa:bb:cc:dd.
 func iaidBytes(v string) (string, bool) {
 	if h, ok := colonHex(v); ok && len(strings.Split(h, ":")) == 4 {
@@ -402,7 +454,23 @@ func buildProfile(s sys.System, f *facts.Facts, c *config, nic *facts.NIC, ssid,
 		sum = append(sum, "IPv4 "+pfx.String())
 	}
 	b.WriteString("\n[ipv6]\n")
+	v6dhcpcd, v6gen := false, ""
+	if in6 == nil && in4 != nil && in4.method == "dhcp" && dhcpClient(s) == "dhcpcd" {
+		v6dhcpcd, v6gen = dhcpcdIPv6(s, name)
+	}
 	switch {
+	case v6dhcpcd:
+		// No inet6 stanza, but dhcpcd (started by `inet dhcp`) also ran IPv6:
+		// router advertisements, SLAAC and DHCPv6. Seen on the HP test machine,
+		// which lost its IPv6 addresses when this was mapped to "ignore".
+		b.WriteString("method=auto\naddr-gen-mode=" + v6gen + "\n")
+		if duid != "" {
+			b.WriteString("dhcp-duid=" + duid + "\n")
+			if iaid := iaidOf(clientID); iaid != "" {
+				b.WriteString("dhcp-iaid=" + iaid + "\n")
+			}
+		}
+		sum = append(sum, "IPv6 automatic (as dhcpcd did)")
 	case in6 == nil || in6.method == "manual":
 		b.WriteString("method=ignore\n")
 	case in6.method == "auto" || in6.method == "dhcp":
