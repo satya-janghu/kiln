@@ -288,7 +288,7 @@ func newMirrorsCmd(info BuildInfo) *cobra.Command {
 			}
 			v := a.Opts.For("mirrors")
 			return mirrors.Bench(cmd.Context(), a.Real, a.Facts, mirrors.BenchOpts{
-				Country: v.String("country"), Neighbors: v.Bool("neighbors"), Sample: v.Int("sample"),
+				Country: v.String("country"), Sample: v.Int("sample"),
 				Top: v.Int("top"), TestBytes: int64(v.Int("test_mb")) << 20, Timeout: v.Int("test_seconds"),
 				Apply: apply, Say: func(s string) { _, _ = fmt.Fprintln(cmd.OutOrStdout(), s) },
 			})

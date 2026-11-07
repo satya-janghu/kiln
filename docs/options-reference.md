@@ -13,17 +13,13 @@ Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (
 | apt-sources | trixie-backports | on | packages come from backports only when a step asks for them |
 | apt-sources | dpkg lock wait | 10 min | how long to wait for unattended-upgrades |
 | mirrors | country | auto | ISO code; auto = from the timezone (Asia/Kolkata → IN); never geo-IP |
-| mirrors | include neighboring countries | on | |
 | mirrors | worldwide sample | 4 | random mirrors from outside the region |
 | mirrors | mirrors to keep | 5 | the top N share `priority:1` in the mirrorlist (apt spreads files across them); deb.debian.org is the `priority:99` fallback |
 | mirrors | test size / time cap | 40 MB / 6 s | per mirror, one at a time; the test file is `main/Contents-all.gz` (~38 MB) |
 | upgrade | full-upgrade | on | |
 | firmware-packages | CPU microcode | on | AMD or Intel, whichever is detected |
-| firmware-packages | non-free firmware | on | GPU / Wi-Fi / NIC firmware matched to the hardware |
 | kernel | backports kernel | **off** | the one deliberate exception to "everything on" (D38). Every machine runs the stock trixie kernel (6.12 LTS, always updated to the latest); select this to use `linux-image-amd64` from trixie-backports (7.2.x) on this machine |
 | kernel | backports firmware | on | only when the backports kernel is selected: reinstall the chosen `firmware-*` packages from trixie-backports |
-| network-migration | move interfaces to NetworkManager | on | applies only if `/etc/network/interfaces` configures a physical NIC |
-| network-migration | include Wi-Fi | on | |
 | multimedia | codecs | on | |
 | multimedia | DVD playback (libdvd-pkg) | on | |
 | multimedia | video acceleration (VA-API) | on | |
@@ -41,14 +37,14 @@ Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (
 | system | zram swap | on | `min(ram / 2, 4096)` MiB, zstd |
 | power | always-on (no sleep, lid ignored) | on | |
 | power | lock GNOME no-suspend settings | on | GNOME only |
-| power | power manager | auto | power-profiles-daemon with GNOME; without GNOME, tuned with kiln's `kiln-performance` profile (throughput-performance with `vm.swappiness=60`) |
-| thermal | performance platform profile | on | set by the power manager; kiln only verifies |
+| power | power manager | auto | power-profiles-daemon with GNOME, tuned without it; both on their `balanced` profile (D52) |
+| thermal | check the balanced platform profile | on | set by the power manager; kiln only verifies |
 | thermal | thinkfan (ThinkPads) | on | only if fan control is exposed |
 | battery | target stop % | 80 | the ladder tries values below 90, nearest to this first |
 | battery | start gap | 5 | start = stop − gap, where supported |
 | battery | software fallback (inhibit-charge watcher) | on | |
 | ssh | port | 22 | |
-| ssh | password logins | on | `on` (D45), `auto` = off once at least one key is in `~/.ssh/authorized_keys` (kiln adds none, D50), or `off` |
+| ssh | password logins | on | `on` (D45) or `off` (D51) |
 | ssh | allow root to log in | on | `PermitRootLogin yes` (D45) |
 | ssh | give root your user's password if it has none | on | copies the password hash (D45) |
 | ssh | MaxAuthTries | 4 | the owner's choice (upstream default 6); agents offering many keys need `IdentitiesOnly` on the client |
@@ -89,7 +85,6 @@ Additional cases:
 | `apt-sources.lock_wait` | Wait for other package managers (minutes) | int | 10 |
 | `mirrors` | *step on/off* | bool | on |
 | `mirrors.country` | Country | string | auto |
-| `mirrors.neighbors` | Include neighboring countries | bool | true |
 | `mirrors.sample` | Worldwide sample | int | 4 |
 | `mirrors.top` | Mirrors to keep | int | 5 |
 | `mirrors.test_mb` | Test size (MB) | int | 40 |
@@ -98,12 +93,8 @@ Additional cases:
 | `upgrade.full_upgrade` | Full upgrade | bool | true |
 | `firmware-packages` | *step on/off* | bool | on |
 | `firmware-packages.microcode` | CPU microcode | bool | true |
-| `firmware-packages.nonfree_firmware` | Non-free firmware | bool | true |
 | `kernel` | *step on/off* | bool | off |
 | `kernel.backports_firmware` | Backports firmware | bool | true |
-| `network-migration` | *step on/off* | bool | on |
-| `network-migration.migrate` | Move interfaces to NetworkManager | bool | true |
-| `network-migration.wifi` | Include Wi-Fi | bool | true |
 | `multimedia` | *step on/off* | bool | on |
 | `multimedia.codecs` | Codecs | bool | true |
 | `multimedia.dvd` | DVD playback (libdvd-pkg) | bool | true |
@@ -127,7 +118,7 @@ Additional cases:
 | `power.lock_gnome_settings` | Lock GNOME no-suspend settings | bool | true |
 | `power.power_manager` | Power manager | choice | auto [auto/power-profiles-daemon/tuned] |
 | `thermal` | *step on/off* | bool | on |
-| `thermal.performance_profile` | Performance platform profile | bool | true |
+| `thermal.check_profile` | Check the balanced platform profile | bool | true |
 | `thermal.thinkfan` | thinkfan (ThinkPads) | bool | true |
 | `battery` | *step on/off* | bool | on |
 | `battery.target_stop` | Stop charging at (%) | int | 80 |
@@ -135,7 +126,7 @@ Additional cases:
 | `battery.software_fallback` | Software fallback (inhibit-charge watcher) | bool | true |
 | `ssh` | *step on/off* | bool | on |
 | `ssh.port` | Port | int | 22 |
-| `ssh.password_logins` | Password logins | choice | on [on/auto/off] |
+| `ssh.password_logins` | Password logins | choice | on [on/off] |
 | `ssh.root_login` | Allow root to log in over SSH | bool | true |
 | `ssh.root_password` | If root has no password, give it your user's password | bool | true |
 | `ssh.max_auth_tries` | MaxAuthTries | int | 4 |
@@ -185,7 +176,7 @@ Root-owned, mode 0600, written at the end of every run (and when `pending` chang
 }
 ```
 
-`pending` is non-null only while a risky change is in progress. It is `{ "step": "network-migration", "backups": [...], "revert": "..." }`. Only options that differ from the defaults are stored in `choices`.
+`pending` is non-null only while a risky change is in progress. It is `{ "step": "ssh", "backups": [...], "revert": "..." }`. Only options that differ from the defaults are stored in `choices`.
 
 ## Environment variables
 

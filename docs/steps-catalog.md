@@ -12,7 +12,7 @@ Steps run in the order listed. Every step and sub-option defaults to **on** in t
 
 kiln must not depend on any Priority: standard package being present (`pciutils`, `wget`, `ca-certificates`, …). Without the "standard" task those packages are missing, so `preflight` installs what kiln itself needs.
 
-Two steps aren't in the original brief's list: `kernel` (5b), split out so it can be toggled on its own (D13), and `network-migration` (6, D4). The old `desktop` step was removed (D29).
+One step isn't in the original brief's list: `kernel` (5b), split out so it can be toggled on its own (D13). Removed: `desktop` (D29), `network-migration`, `firewall` and `remote-desktop` (D50, D52).
 
 **Risky** marks a step that uses the verify-then-revert pattern from [architecture.md](architecture.md#risky-changes-verify-then-revert-on-failure).
 
@@ -138,11 +138,11 @@ All of this runs under a `revert` snapshot of `sources.list` and `sources.list.d
 **Actions:**
 1. **Candidates.** Parse the Debian mirror masterlist at `https://mirror-master.debian.org/status/Mirrors.masterlist` (about 370 RFC822 stanzas with `Site:`, `Country:` (e.g. `DE Germany`), `Archive-architecture:`, `Archive-http:` (a path such as `/debian/`)). Select:
    - mirrors whose `Archive-architecture` includes `amd64` and that have `Archive-http`. Their URL is `http://<Site><Archive-http>`; the masterlist advertises no HTTPS.
-   - mirrors in the configured country plus its neighbors;
-   - `worldwide_sample` random others;
+   - mirrors in the configured country;
+   - `worldwide_sample` random others (a farther mirror can be faster; only measured download speed counts);
    - `deb.debian.org`.
 
-   `country: auto` maps the configured timezone (`system.timezone`, else `timedatectl show -p Timezone`) to a country code via the zone1970.tab table compiled into kiln (Asia/Kolkata → IN). Neighbors come from a small built-in region table. kiln never calls a geo-IP service (D21). An unknown timezone means worldwide sample + deb.debian.org only.
+   `country: auto` maps the configured timezone (`system.timezone`, else `timedatectl show -p Timezone`) to a country code via the zone1970.tab table compiled into kiln (Asia/Kolkata → IN). There's no neighbouring-countries option (D52). kiln never calls a geo-IP service (D21). An unknown timezone means worldwide sample + deb.debian.org only.
 2. **Freshness.** For each candidate, fetch `dists/trixie/InRelease` and `dists/trixie-updates/InRelease` (and `trixie-backports` if enabled), and parse `Date:` and `Valid-Until:`. Drop a mirror if:
    - its trixie `Date:` differs from deb.debian.org's (it's missing a point release; trixie only changes at point releases);
    - its trixie-updates or trixie-backports `Date:` is more than 12 h older than deb.debian.org's (those change on every push);
@@ -236,62 +236,7 @@ After that, the backports metapackage brings each newer backports kernel. The `a
 
 ## 6. network-migration
 
-**ID** `network-migration` · network · depends: preflight · **risky**
-
-**Purpose:** make NetworkManager the only network owner, so Cockpit's networking page works and nothing fights over interfaces.
-
-**Applies:** at least one physical interface is configured in `/etc/network/interfaces` (or a file under `interfaces.d`).
-- **Otherwise:** "not applicable: NetworkManager already manages networking".
-- **GNOME installs:** this is the expected result there. Verified in netcfg 1.197 (`finish-install.d/55netcfg-copy-config`): when network-manager is installed in the target, the installer copies its connections to `/etc/NetworkManager/system-connections/` (0600) and writes only `lo` to `interfaces`. So in practice the step matters on machines installed without a desktop.
-- **Not applicable (manual):** if any stanza uses features kiln won't translate:
-  - `bridge_*`, `bond-*` or `vlan` options;
-  - `source`/`source-directory` beyond the default `interfaces.d`;
-  - `mapping` stanzas;
-  - `pre-up`/`up`/`post-up`/`down` hooks.
-
-  The reason names the line to migrate by hand.
-
-**Options:** move interfaces to NetworkManager (on), include Wi-Fi (on).
-
-**Facts used** (ifupdown 0.8.44, dhcpcd 10.1.0, network-manager 1.52.1):
-- **Which DHCP client ifupdown runs:** it prefers `dhclient` if installed, then `udhcpc`, then `dhcpcd`. Fresh trixie installs have `dhcpcd-base`.
-- **dhcpcd's client ID:** DUID-based (RFC 4361). The shipped `dhcpcd.conf` enables `duid`, which is stored as colon-hex text in `/var/lib/dhcpcd/duid`. The client ID on the wire is `ff` + IAID (last 4 bytes of the MAC) + DUID.
-- **dhclient's client ID:** built the same way. Its DUID is in `default-duid` in `/var/lib/dhcp/dhclient6.<if>.leases`.
-- **What NM can send:** a hex `ipv4.dhcp-client-id` is sent byte for byte. NM's own `duid` mode hashes `/etc/machine-id`, so it does **not** match.
-
-**Actions (one interface at a time; Wi-Fi last):**
-1. Install `network-manager` if it's missing.
-2. Read the current config from the stanzas (`auto`/`allow-hotplug`, `inet dhcp|static`, `inet6 auto|dhcp|static`, `wpa-ssid`/`wpa-psk`/`wpa-conf`) together with live `ip -j addr` / `ip -j route` and `/etc/resolv.conf`.
-3. Build the NM profile `kiln-<iface>` as a **keyfile**: `/etc/NetworkManager/system-connections/kiln-<iface>.nmconnection`, written 0600 root via the managed writer. NM ignores keyfiles readable by anyone else. Using a file keeps a Wi-Fi PSK out of the process list, where it would be visible on an `nmcli` command line. The profile includes:
-   - `interface-name`, `autoconnect=false` until the check passes (see 4 and 7);
-   - IPv4: `method=manual` with address, gateway and DNS for static, or `method=auto` for DHCP;
-   - for DHCP, `dhcp-client-id=ff:<IAID>:<DUID>` built from the facts above. Any `clientid`/`iaid` line in `dhcpcd.conf` is honoured. With dhclient, the DUID comes from `default-duid` in `/var/lib/dhcp/dhclient6.<iface>.leases`, in either `lease-id-format` (quoted octal or colon hex). If the DUID can't be read, use `mac` and note that the IP may change.
-   - IPv6, with an `inet6` stanza: `method=auto` for `inet6 auto`, `dhcp`, `manual` or `ignore` to match it. Also `addr-gen-mode=eui64`, so the SLAAC address stays the same as under ifupdown (NM's default is stable-privacy), and `dhcp-duid=<DUID>` for DHCPv6.
-   - IPv6, with no `inet6` stanza: if the `inet dhcp` client is dhcpcd, it was doing IPv6 too, because ifupdown starts it as plain `dhcpcd <iface>` with no `-4`. So kiln writes `method=auto`, unless `dhcpcd.conf` says `ipv4only` or `noipv6`, in which case it writes `ignore`. It also writes `addr-gen-mode=stable-privacy` for `slaac private` (Debian's shipped `dhcpcd.conf`) or `eui64` otherwise, plus `dhcp-duid=<DUID>` and `dhcp-iaid=<IAID>`, so DHCPv6 keeps the same address. A `slaac private` SLAAC address can't be carried over, because NM hashes its own secret, so that one changes. dhclient (`-4`) and udhcpc only did IPv4, so with them it's `ignore`. The HP test machine lost IPv6 before this rule existed.
-   - Wi-Fi: `[wifi] ssid=…`, `[wifi-security] key-mgmt=wpa-psk`, `psk=…` (8–63 characters or 64 hex digits). If the PSK can't be read, that interface stays on ifupdown with a note (only when "include Wi-Fi" is on; otherwise Wi-Fi is left alone).
-4. `nmcli connection load <file>`. The profile is written with `autoconnect=false`, so NM can't start it on its own the moment the device becomes managed. `nmcli connection up` on a profile that's already activating **tears that activation down and restarts it**, so an autoconnect race would mean two DHCP exchanges. The profile exists before the device becomes managed, which also stops NM creating its automatic "Wired connection" profile (NetworkManager.conf(5) `no-auto-default`; NM checks for a matching profile).
-5. Record `pending` in `state.json` with the backup and profile names. The `interfaces` backup keeps mode 0600 when it contains a `wpa-psk`.
-6. Switch in this order:
-   1. `ifdown <iface>`. This must run **while the stanza still exists**, or ifupdown treats the interface as unknown, skips its down commands, and leaves dhcpcd running alongside NM.
-   2. Comment out that interface's stanzas in `interfaces`. Keep `lo`, and keep the file mode.
-   3. `systemctl restart NetworkManager`, the Debian wiki's documented step, so NetworkManager stops treating the interface as unmanaged. A plain `nmcli connection reload` re-reads `/etc/network/interfaces` but leaves a device marked unmanaged at startup unmanaged; this was seen on the HP test machine.
-   4. Make sure no DHCP client is still running for the interface: `dhcpcd -k <iface>` / `dhclient -r <iface>` if a process remains after `ifdown`.
-   5. `nmcli device set <iface> managed yes`.
-   6. Wait until NetworkManager reports the device as available (state 30 or higher) and, for Wi-Fi, until a scan lists networks (`nmcli device wifi rescan`, then `nmcli device wifi list --rescan no`). Activating any earlier fails with "No suitable device found" (seen on the HP test machine).
-   7. `nmcli --wait 90 connection up kiln-<iface> ifname <iface>`, which waits for activation (90 s is nmcli's default for `up`).
-7. Check locally, polling for up to 60 s (D41 deadline): the link is up and has an address, the default route is present, DNS resolves, and HTTPS to `deb.debian.org` works.
-   - **If it passes,** run `nmcli connection modify kiln-<iface> connection.autoconnect yes` so it comes up at boot, then clear `pending`. If the address changed, show the new IP on the run screen and in the summary.
-   - **If it fails, revert:** `nmcli connection down kiln-<iface>`, delete the profile, `nmcli device set <iface> managed no`, `ip addr flush dev <iface>`, restore `interfaces`, and bring the interface up the way Debian does at boot (D48). Then wait up to 60 s for the network check to pass again, clear `pending`, and record `failed`. Bringing it up:
-     - `allow-hotplug`: `systemctl restart ifup@<iface>.service` (instance name escaped like `systemd-escape`). Restart, because kiln's own `ifdown` leaves the unit active; the unit's `ifdown` on an interface that's already down is harmless.
-     - `auto` only: `systemctl restart networking.service`, which also restarts any other interfaces still on ifupdown.
-     - neither: `ifup <iface>`.
-     This way wpa_supplicant and dhcpcd run in ifupdown's own unit, not in kiln's scope.
-     Before bringing it up, kiln waits up to 30 s for `/run/wpa_supplicant/<iface>` to disappear. NetworkManager's wpa_supplicant lets go of the interface asynchronously after `managed no`, and ifupdown's wpa_supplicant refuses to start while that control socket exists. For `ifup@`, which is `Type=simple`, kiln then polls the unit for up to 6 min until it is `active/exited` (success) or `failed`, because `systemctl restart` returns as soon as `ifup` has started (D49). The whole bring-up is one registered restore step (`kiln: ifupdown-up <iface>` in `state.json`), so a revert offered at the next start waits the same way.
-8. Disable `networking.service` only if no non-`lo` stanza remains in `interfaces`.
-
-**Check:** every stanza kiln migrated is gone, those interfaces are managed by NM with their `kiln-*` profile set to autoconnect (an unplugged cable still counts as done), and `networking.service` is disabled, or any stanza left behind is listed as an intentional exception (Wi-Fi without a readable PSK, or a manual-only stanza).
-
-**Gotchas:** later steps need the network. If a failed migration couldn't be reverted, the steps that need the network are skipped as dependents, and the summary gives manual recovery instructions: restore `/var/lib/kiln/backup/etc/network/interfaces` to `/etc/network/interfaces` and run `systemctl restart networking`.
+**Removed (D52).** kiln leaves networking as the installer set it up: ifupdown on servers, NetworkManager on GNOME machines. Cockpit's networking page can then only show, not edit, ifupdown interfaces.
 
 ---
 
@@ -307,7 +252,8 @@ After that, the backports metapackage brings each newer backports kernel. The `a
   2. Install `libdvd-pkg`. During the install the build is postponed, because dpkg holds the lock.
   3. Run `dpkg-reconfigure -f noninteractive libdvd-pkg`. The DVD part runs after NVIDIA. If the build fails (for example, videolan.org is unreachable), that becomes a note and the rest of the step still counts as done (D44). That builds `libdvdcss2` from the videolan.org source tarball, using `build-essential` and `debhelper`.
 - **VA-API:**
-  - AMD → `mesa-va-drivers`, `vainfo`.
+  - `vainfo` on every machine with a GPU, whatever the vendor (D51).
+  - AMD → `mesa-va-drivers`.
   - Intel graphics (Gen8+) → `intel-media-va-driver-non-free` (non-free). It `Conflicts` with `intel-media-va-driver` (main), so only one of the two is ever installed; main is used if non-free is disabled. Pre-Gen8 Intel isn't covered, and that's noted.
 - **NVIDIA** (option on), only if an NVIDIA GPU is detected. The driver source is your choice per machine (D39):
   - **Source choice.** "NVIDIA latest" uses NVIDIA's own repository and the newest branch (620.x today). It's the default when the GPU is **Turing or newer** (GTX 16xx / RTX 20xx and later; e.g. your RTX 2070 Super). The repository ships only NVIDIA's open kernel modules, which support "any Turing or later GPU" and Linux ≥ 4.15.
@@ -433,13 +379,14 @@ After that, the backports metapackage brings each newer backports kernel. The `a
     - `/etc/gdm3/greeter.dconf-defaults` is ucf-managed, and in Debian's version the power keys are **commented out**. kiln uncomments or inserts `sleep-inactive-ac-type='nothing'` and `sleep-inactive-battery-type='nothing'` under the `[org/gnome/settings-daemon/plugins/power]` header (key-level edit with backup).
     - Then `systemctl reload gdm3`. `ExecReload=` runs `/usr/share/gdm/generate-config`, which rebuilds `/var/lib/gdm3/greeter-dconf-defaults`, followed by SIGHUP; gdm's SIGHUP handler only reloads settings, so sessions survive. `dpkg-reconfigure gdm3` does **not** do this.
 - **Power manager:**
-  - **With GNOME:** `power-profiles-daemon` (pulled in by GNOME), set with `powerprofilesctl set performance`. The choice persists in `/var/lib/power-profiles-daemon/state.ini`. ppd only offers `performance` when amd-pstate is in active (EPP) mode, or when `platform_profile_choices` lists both balanced and performance. If it isn't offered (possible on the 4500U with acpi-cpufreq), keep `balanced` and note it (fact R).
-  - **Without GNOME:** `tuned`, with a kiln profile `/etc/tuned/profiles/kiln-performance/tuned.conf` containing `[main] include=throughput-performance` and `[sysctl] vm.swappiness=60`. `throughput-performance` sets `vm.swappiness=10`, which works against zram, so kiln restores the kernel default. Then `tuned-adm profile kiln-performance`.
+  - **Balanced everywhere (D52),** so the CPU doesn't sit at high clocks, using power and making heat, when idle.
+  - **With GNOME:** `power-profiles-daemon` (pulled in by GNOME), set with `powerprofilesctl set balanced`, which ppd always offers. The choice persists in `/var/lib/power-profiles-daemon/state.ini`. ppd 0.30's balanced sets the `balanced` platform profile and, with amd-pstate, EPP `balance_performance` on AC (`balance_power` on battery).
+  - **Without GNOME:** `tuned` with trixie's stock `balanced` profile (`tuned-adm profile balanced`): `schedutil` governor, EPP `balance_performance`, boost on, `[acpi] platform_profile=balanced`, no `vm.swappiness` change (tuned 2.25.1). kiln's old `/etc/tuned/profiles/kiln-performance/` from earlier versions is removed.
   - **Never both.** If switching, stop, disable and remove the other. Never install TLP. No trixie task installs TLP, so kiln doesn't look for it (D50).
 
-**Check:** the targets are masked, the logind drop-in matches, the dconf keys and locks are present (GNOME), the greeter keys are uncommented, and the active profile is `performance` (or the noted fallback) / `kiln-performance`.
+**Check:** the targets are masked, the logind drop-in matches, the dconf keys and locks are present (GNOME), the greeter keys are uncommented, and the active profile is ppd's `balanced` / tuned's `balanced`, with no old `kiln-performance` profile left.
 
-**Gotchas:** power-profiles-daemon `Conflicts: tlp, laptop-mode-tools`, and `tuned-ppd` `Conflicts/Provides: power-profiles-daemon`. Plain `tuned` and ppd don't conflict at the package level, so kiln enforces the one-owner rule itself. ppd and tuned's throughput-performance (`[acpi] platform_profile=performance`, EPP performance) both drive the platform profile and AMD EPP themselves, so `thermal` only verifies.
+**Gotchas:** power-profiles-daemon `Conflicts: tlp, laptop-mode-tools`, and `tuned-ppd` `Conflicts/Provides: power-profiles-daemon`. Plain `tuned` and ppd don't conflict at the package level, so kiln enforces the one-owner rule itself. ppd and tuned's `balanced` both drive the platform profile and AMD EPP themselves, so `thermal` only verifies.
 
 ---
 
@@ -450,11 +397,11 @@ After that, the backports metapackage brings each newer backports kernel. The `a
 **Applies:** each sub-part has its own applicability.
 
 **Actions:**
-- **platform_profile:** kiln **never writes** it. ppd 0.30 writes `/sys/firmware/acpi/platform_profile` (and adopts external writes), and tuned's `throughput-performance` sets `[acpi] platform_profile=performance`. kiln only verifies and reports:
-  - If `/sys/firmware/acpi/platform_profile_choices` contains `performance`, the current value should be `performance`.
-  - On kernel ≥ 6.14 (the backports kernel), the legacy file shows the **intersection** of all handlers' choices and reads `custom` when handlers disagree. `custom` is treated as "not performance", and the per-handler values from `/sys/class/platform-profile/*/profile` are reported.
+- **platform_profile:** kiln **never writes** it. ppd 0.30 writes `/sys/firmware/acpi/platform_profile` (and adopts external writes), and tuned's `balanced` sets `[acpi] platform_profile=balanced`. kiln only verifies and reports (option "Check the balanced platform profile"):
+  - If `/sys/firmware/acpi/platform_profile_choices` contains `balanced`, the current value should be `balanced`.
+  - On kernel ≥ 6.14 (the backports kernel), the legacy file shows the **intersection** of all handlers' choices and reads `custom` when handlers disagree. `custom` is treated as a difference, and the per-handler values from `/sys/class/platform-profile/*/profile` are reported.
   - There is no `kiln-thermal.service`.
-- **AMD:** report `/sys/devices/system/cpu/amd_pstate/status` (active/passive/guided/disable) and the per-policy `energy_performance_preference`. Under the performance profile, ppd's amd-pstate driver sets the governor and EPP to `performance` and enables boost. A difference is a note. No kernel command-line changes. The default amd-pstate mode is fact R.
+- **AMD:** report `/sys/devices/system/cpu/amd_pstate/status` (active/passive/guided/disable) and the per-policy `energy_performance_preference`. Under the balanced profiles, EPP should be `balance_performance` (or `balance_power`, ppd on battery). A difference is a note. No kernel command-line changes. The default amd-pstate mode is fact R.
 - **ThinkPad** (vendor LENOVO and thinkpad_acpi loaded, and `/proc/acpi/ibm/fan` exists):
   1. Write `/etc/modprobe.d/kiln-thinkpad.conf` with `options thinkpad_acpi fan_control=1`, then install `thinkfan` (1.3.1). Its unit ships disabled and reads `/etc/default/thinkfan` (`DAEMON_ARGS="-q"`).
   2. Write `/etc/thinkfan.yaml`. thinkfan reads it before `/etc/thinkfan.conf`, and Debian ships neither. The curve keeps the fan on and ramps early:
@@ -488,7 +435,7 @@ After that, the backports metapackage brings each newer backports kernel. The `a
 - **HP:** Linux can't drive the fans. Rely on the platform profile, and note "check the BIOS for *Fan Always On*".
 - **lm-sensors:** install `lm-sensors` only. Don't run `sensors-detect`: on these laptops k10temp, amdgpu, thinkpad and hp-wmi hwmon drivers load automatically, and its I2C/Super I/O probing adds risk for no gain.
 
-**Check:** the platform profile and AMD EPP are reported as notes (a machine whose firmware offers no `performance` profile is still done). On ThinkPads, the modprobe file and thinkfan config must match, and thinkfan must be active, or the boot-time enable service must be pending: enabled, `fan_control` not yet `Y`, and not `failed`. A failed boot helper reports "not done" with a `journalctl -b -u kiln-thinkfan-enable.service` hint.
+**Check:** the platform profile and AMD EPP are reported as notes (a machine whose firmware offers no `balanced` profile is still done). On ThinkPads, the modprobe file and thinkfan config must match, and thinkfan must be active, or the boot-time enable service must be pending: enabled, `fan_control` not yet `Y`, and not `failed`. A failed boot helper reports "not done" with a `journalctl -b -u kiln-thinkfan-enable.service` hint.
 
 ---
 
@@ -583,10 +530,10 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 **Actions:**
 1. **Server.** Install `openssh-server` if missing, and `systemctl enable --now ssh.service` if it isn't enabled (unless `ssh.socket` was enabled by hand).
 2. **Root password** (option on): if root's `/etc/shadow` password field is locked or empty (`!`, `*`, or blank) and the target user has a password, copy the user's password **hash** to root with `chpasswd -e` (the `root:<hash>` line goes on stdin, never argv, and the output isn't logged). root then has the same password as the user, and kiln never sees the password itself. If the user has no password either, a note says to run `sudo passwd root`.
-3. **Keys:** kiln doesn't add SSH keys (D50). It only counts the valid keys already in `<home>/.ssh/authorized_keys`, for the `auto` password setting below.
+3. **Keys:** kiln doesn't add SSH keys (D50). It counts the valid keys already in `<home>/.ssh/authorized_keys`, so it can warn when password logins are off and no key exists.
 4. **Drop-in** `/etc/ssh/sshd_config.d/10-kiln.conf`:
    - `PermitRootLogin yes` (option "Allow root to log in over SSH", on by default, D45), `MaxAuthTries 4` (the owner's choice), `X11Forwarding no`.
-   - `PasswordAuthentication yes` by default (option "Password logins": `on`, D45). The other values are `auto` (off once at least one key is installed) and `off`. When passwords are on, the review screen and summary warn that password logins for the user and root are open to anywhere SSH is reachable, with fail2ban slowing down guessing.
+   - `PasswordAuthentication yes` by default (option "Password logins": `on`, D45). The other value is `off` (D51); with `off` and no key in `authorized_keys`, the review screen warns that nobody could log in over SSH. When passwords are on, the review screen and summary warn that password logins for the user and root are open to anywhere SSH is reachable, with fail2ban slowing down guessing.
    - `KbdInteractiveAuthentication no` is left out, because Debian already sets it.
 5. **Port** (when it isn't 22): `Port <n>` in the drop-in. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`.
 6. **Verify, then revert on failure:**
@@ -667,13 +614,13 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
 
 ## 18. cockpit
 
-**ID** `cockpit` · apps · depends: apt-sources, network-migration (soft: works without it, but the networking page needs NM)
+**ID** `cockpit` · apps · depends: apt-sources
 
 **Actions:**
 - Install `cockpit`. With backports on, use `apt-get install -t trixie-backports cockpit` (371). The `(>= source:Version)` dependencies pull the matching 371 binaries from backports. Without backports, install from main (337).
 - **Keep Recommends**. In both versions they're `cockpit-storaged`, `cockpit-networkmanager` and `cockpit-packagekit`, and `cockpit-networkmanager` is the networking page.
 - `cockpit-machines` and `cockpit-podman` are not recommended, and kiln never installs them.
-- The Recommends pull in `network-manager`, `packagekit` and `udisks2`. The review screen lists them, even on machines where network-migration is off or not applicable.
+- The Recommends pull in `network-manager`, `packagekit` and `udisks2`. The review screen lists them. NetworkManager then runs but leaves the installer's ifupdown interfaces alone (D52).
 - `cockpit.socket` is enabled and started by the package (`ListenStream=9090`). kiln only verifies this.
 
 **Check:** `cockpit` is installed from the expected suite, `cockpit-networkmanager` is installed, and `cockpit.socket` is enabled and active.

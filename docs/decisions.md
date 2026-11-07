@@ -411,12 +411,12 @@ Details I filled in, flagged for your review:
 - **firewall:** ports removed from the option aren't closed again. *Moot: step removed (D50).*
 - **firewall:** `rdp` opens whenever GNOME is detected. *Moot: step removed (D50).*
 - **ssh:** a hard dependency on the firewall step. *Moot (D50).*
-- **ssh:** `password_logins` has the values auto/off/on, and **on** wasn't in the brief.
+- **ssh:** `password_logins` has the values auto/off/on, and **on** wasn't in the brief. *Decided: on/off only (D51).*
 - **ssh:** a GitHub 404 fails at plan time, not in the form. *Moot (D50).*
-- **network-migration:** the post-switch check polls for 60 s (architecture's deadline; the catalog said 30 s). `pending` is recorded before the keyfile is written.
-- **network-migration:** `inet manual` stanzas, other methods, and VLAN/alias names are left as exceptions, not migrated.
+- **network-migration:** the post-switch check polls for 60 s (architecture's deadline; the catalog said 30 s). `pending` is recorded before the keyfile is written. *Moot: step removed (D52).*
+- **network-migration:** `inet manual` stanzas, other methods, and VLAN/alias names are left as exceptions, not migrated. *Confirmed (D51).* *Moot: step removed (D52).*
 - **mirrors:**
-  - neighbors are the UN M49 sub-regions;
+  - neighbors are the UN M49 sub-regions; *Moot: option removed (D52).*
   - zone.tab is used as well as zone1970.tab, to cover link names;
   - if deb.debian.org is in the top N, it isn't listed twice;
   - the list carries a timestamp comment for the 30-day freshness check.
@@ -429,10 +429,10 @@ Details I filled in, flagged for your review:
   - method "none" counts as done until an interface appears;
   - the watch timer runs every 15 min.
 - **system:** zram installs `systemd-zram-generator` if it's missing.
-- **power:** when ppd doesn't offer `performance`, kiln sets `balanced` explicitly. ~~TLP is stopped, not disabled.~~ (TLP handling removed, D50.) A missing greeter power section is appended.
+- **power:** when ppd doesn't offer `performance`, kiln sets `balanced` explicitly. ~~TLP is stopped, not disabled.~~ (TLP handling removed, D50.) A missing greeter power section is appended. *Moot: balanced profile (D52).*
 - **thermal:** the first detected sensor is required and later ones are optional. HP is matched by DMI vendor.
-- **firmware-packages:** Realtek is matched by PCI vendor 10ec or the r8169/r8152/rtw88/rtw89 drivers. isenkram is installed only with the non-free firmware option.
-- **firmware-updates:** runs fwupdmgr on every kiln run, because state has no field for its last result. A refused update becomes a note.
+- **firmware-packages:** Realtek is matched by PCI vendor 10ec or the r8169/r8152/rtw88/rtw89 drivers. isenkram is installed only with the non-free firmware option. *isenkram: always installed now (D52).*
+- **firmware-updates:** runs fwupdmgr on every kiln run, because state has no field for its last result. A refused update becomes a note. *Confirmed (D51).*
 
 **Apps and dev:**
 - **NVIDIA:**
@@ -442,7 +442,7 @@ Details I filled in, flagged for your review:
   - The one-time password goes to `mokutil --generate-hash` on stdin, and `--list-new` is dropped (`--test-key` covers MokNew).
   - The one-time password is shown once on the summary screen and stored in `/etc/kiln/secrets/mok`, never in a note (no secrets in the world-readable summary).
 - **remote-desktop:** with the password left empty, kiln reuses the stored password and generates one only if none exists, so a re-run doesn't change it. Generated passwords are 20 characters. *Moot: step removed (D50).*
-- **Intel VA-API:** without a verified Gen8 ID table, the driver is installed for any Intel GPU, with a pre-Gen8 note. `vainfo` is installed only for AMD, as the catalog literally says.
+- **Intel VA-API:** without a verified Gen8 ID table, the driver is installed for any Intel GPU, with a pre-Gen8 note. `vainfo` is installed only for AMD, as the catalog literally says. *Changed: vainfo for every GPU (D51).*
 - **cockpit:** with backports off, an already-installed backports cockpit is accepted and noted, not downgraded.
 - **docker:** the signing key download has no sha256 (the catalog gives none; apt verifies packages with it).
 - **devtools:** an existing non-symlink `fd`/`bat` is left alone with a note.
@@ -570,6 +570,28 @@ Field observations so far are in debian13-notes.md, "Field observations".
 - **Download pinning:** nothing more. kiln downloads from the official sources the docs name and trusts them.
 - Saved choices for the removed options are ignored with a log line, so older `state.json` files still load.
 
+### D51 · 2026-11-07 · First D43 walk-through
+
+**Status: decided** (your answers on 2026-11-07).
+
+- **SSH password logins:** the option offers On (default, D45) and Off only. "Auto" (off as soon as a key appears) is gone. A saved `auto` is ignored with a log line and falls back to On.
+- **Firmware updates:** fwupdmgr runs on every kiln run, as today.
+- **vainfo:** installed on every machine with a GPU, whatever the vendor, not only AMD. Intel driver handling is unchanged.
+- **Network migration:** `inet manual` stanzas, methods kiln can't translate, and VLAN/alias interfaces stay on ifupdown with a note, as today.
+
+### D52 · 2026-11-07 · Second D43 walk-through: no network migration, balanced power, no mirror neighbours, non-free always
+
+**Status: decided** (your answers on 2026-11-07).
+
+- **network-migration step removed.** kiln leaves networking as the installer set it up: ifupdown on servers, NetworkManager on GNOME machines. Its only reason was Cockpit's networking page (brief, section 6), which can now show but not edit ifupdown interfaces. The undo machinery added for it (D48, D49's registered restore steps) went with it. The SSH step is the only risky change left.
+- **Balanced power everywhere,** so an idle CPU doesn't sit at high clocks using power and making heat (on the test box, kiln's performance profile held 2.18 GHz while idle).
+  - With GNOME: power-profiles-daemon `balanced`, which sets the `balanced` platform profile and, with amd-pstate, EPP `balance_performance` on AC, `balance_power` on battery (ppd 0.30 source).
+  - Without GNOME: tuned's stock `balanced` profile (schedutil, EPP balance_performance, `platform_profile=balanced`, boost on). kiln's `kiln-performance` profile (P7) is removed from machines that have it.
+  - The thermal step now checks for `balanced` and the balanced EPP values; its option is renamed `thermal.check_profile`.
+- **Mirrors:** no "neighbouring countries" option, and the UN sub-region table is gone. Candidates are your country, a random worldwide sample and deb.debian.org, ranked only by measured download speed.
+- **Non-free:** always on. The `firmware-packages.nonfree_firmware` option is gone, so non-free firmware and the isenkram report are always included; apt-sources already always enables `non-free non-free-firmware`.
+- **Kept as they are:** the battery, watcher and fallback choices; the Intel driver for any Intel GPU; the Secure Boot one-time password handling; and the three app items (Cockpit not downgraded, fd/bat left alone, other extrepo repos only enabled).
+
 ## Proposals from the second verification pass
 
 **Status:** you accepted all of these on 2026-11-07 as written (the "current text" option), except P1 and P14, which D38 replaces. They're kept here as a record of the choices and the alternatives.
@@ -632,7 +654,7 @@ It adds a package and lists firmware that's still missing, without installing an
 - **A.** Keep it (current text).
 - **B.** Drop it.
 
-### P7 · Custom tuned profile with `vm.swappiness=60` (step 11, machines without GNOME)
+### P7 · Custom tuned profile with `vm.swappiness=60` (step 11, machines without GNOME) *(Superseded by D52: tuned's stock balanced profile.)*
 
 tuned's `throughput-performance` sets swappiness to 10, which works against zram.
 
@@ -679,7 +701,7 @@ The platform profile is set by ppd or tuned, and kiln only checks it. Your brief
 - **A.** Keep it as now.
 - **B.** Restore a boot unit that also re-applies the platform profile.
 
-### P13 · NetworkManager keeps the old-style IPv6 address (`eui64`) (step 6)
+### P13 · NetworkManager keeps the old-style IPv6 address (`eui64`) (step 6) *(Moot: network-migration removed, D52.)*
 
 NM's default is a privacy-stable address, which would differ from what ifupdown used.
 

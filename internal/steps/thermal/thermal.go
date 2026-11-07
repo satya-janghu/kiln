@@ -24,7 +24,7 @@ type Step struct{ step.Base }
 func New() step.Step { return Step{} }
 
 func (Step) ID() string          { return "thermal" }
-func (Step) Title() string       { return "Cooling and performance profile" }
+func (Step) Title() string       { return "Cooling and power profile" }
 func (Step) Category() string    { return "power" }
 func (Step) DependsOn() []string { return []string{"power"} }
 
@@ -37,8 +37,8 @@ func (Step) Packages() []step.PackageRef {
 
 func (Step) Options(*facts.Facts) []options.Field {
 	return []options.Field{
-		{Key: "performance_profile", Label: "Performance platform profile", Kind: options.Bool, Default: true,
-			Help: "Set by the power manager; kiln only verifies it and reports differences."},
+		{Key: "check_profile", Label: "Check the balanced platform profile", Kind: options.Bool, Default: true,
+			Help: "Set by the power manager's balanced profile; kiln only verifies it and reports differences."},
 		{Key: "thinkfan", Label: "thinkfan (ThinkPads)", Kind: options.Bool, Default: true,
 			Help: "Only if this ThinkPad exposes fan control: the fan never stops and ramps up early."},
 	}
@@ -101,7 +101,7 @@ func (Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 	if !apt.Installed(ctx, env.Sys, "lm-sensors") {
 		return step.Todo("lm-sensors isn't installed"), nil
 	}
-	if env.Opts.Bool("performance_profile") {
+	if env.Opts.Bool("check_profile") {
 		// Never Todo: a difference is reported as a note, every run.
 		detail = append(detail, reportProfile(env, env.Sys)...)
 	}
@@ -122,9 +122,9 @@ func (Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
 		// sensors-detect isn't run: the hwmon drivers here load automatically (P3).
 		acts = append(acts, action.AptInstall{Pkgs: []string{"lm-sensors"}})
 	}
-	if env.Opts.Bool("performance_profile") {
+	if env.Opts.Bool("check_profile") {
 		acts = append(acts, action.Custom{
-			Desc: "check that the platform profile is performance where it's offered (per-handler values if it reads custom), report amd-pstate and the CPU energy preference, and add any difference to the summary (kiln never writes these)",
+			Desc: "check that the platform profile is balanced where it's offered (per-handler values if it reads custom), report amd-pstate and the CPU energy preference, and add any difference to the summary (kiln never writes these)",
 			Fn: func(_ context.Context, s sys.System) error {
 				reportProfile(env, s)
 				return nil

@@ -67,7 +67,6 @@ func (Step) Options(*facts.Facts) []options.Field {
 			Help: "On by default (D45): your user and root can log in with their passwords from anywhere SSH is reachable.",
 			Choices: []options.ChoiceItem{
 				{Value: "on", Label: "On"},
-				{Value: "auto", Label: "Off once at least one key is installed"},
 				{Value: "off", Label: "Off"},
 			}},
 		{Key: "root_login", Label: "Allow root to log in over SSH", Kind: options.Bool, Default: true,
@@ -365,14 +364,8 @@ func serverReady(ctx context.Context, env *step.Env) string {
 	return ""
 }
 
-func passwordAuth(env *step.Env, keys int) string {
-	switch env.Opts.String("password_logins") {
-	case "on":
-		return "yes"
-	case "off":
-		return "no"
-	}
-	if keys > 0 {
+func passwordAuth(env *step.Env) string {
+	if env.Opts.String("password_logins") == "off" {
 		return "no"
 	}
 	return "yes"
@@ -477,7 +470,7 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 	}
 	_, have := installed(env.Sys, authorizedKeys(env))
 	socket := SocketMode(ctx, env.Sys)
-	pa := passwordAuth(env, len(have))
+	pa := passwordAuth(env)
 	if b, err := env.Sys.ReadFile(DropIn); err != nil || string(b) != string(dropInContent(env, pa, socket)) {
 		return step.Todo("%s is missing or different", DropIn), nil
 	}
@@ -499,20 +492,17 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 	socket := SocketMode(ctx, env.Sys)
 	port := Port(env)
 
-	if passwordAuth(env, predicted) == "yes" {
+	if passwordAuth(env) == "yes" {
 		who := env.User().Name
 		if rootLogin(env) == "yes" {
 			who += " and root"
 		}
 		msg := "SSH password logins are on for " + who
-		if env.Opts.String("password_logins") == "auto" {
-			msg += " because no SSH key is installed for " + env.User().Name
-		}
 		msg += ", from anywhere SSH is reachable (D45). fail2ban slows down guessing, but a guessed password gives root access. Use strong passwords, or turn password logins off in the SSH options."
 		env.Notes.Warn("%s", msg)
 		env.Notes.Add("%s", msg)
 	} else if predicted == 0 {
-		env.Notes.Warn("SSH password logins will be off, but no SSH key is installed for %s, so nobody can log in to this machine over SSH. Add your key to %s yourself first, or set password logins to \"On\".", env.User().Name, akPath)
+		env.Notes.Warn("SSH password logins will be off, but no SSH key is installed for %s, so nobody can log in to this machine over SSH. Add your key to %s yourself first, or set password logins to On.", env.User().Name, akPath)
 	}
 	if !slices.Contains(CurrentPorts(ctx, env.Sys), port) {
 		if who, taken := portTaken(ctx, env.Sys, port); taken {
@@ -559,7 +549,7 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 			},
 		})
 	}
-	desc := fmt.Sprintf("write %s (PermitRootLogin %s, MaxAuthTries %d, X11Forwarding no, PasswordAuthentication %s", DropIn, rootLogin(env), env.Opts.Int("max_auth_tries"), passwordAuth(env, predicted))
+	desc := fmt.Sprintf("write %s (PermitRootLogin %s, MaxAuthTries %d, X11Forwarding no, PasswordAuthentication %s", DropIn, rootLogin(env), env.Opts.Int("max_auth_tries"), passwordAuth(env))
 	if port != 22 {
 		if socket {
 			desc += fmt.Sprintf("; port %d in %s", port, SocketDropIn)
@@ -572,12 +562,7 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		Desc: desc,
 		K:    action.Services,
 		Fn: func(ctx context.Context, s sys.System) error {
-			pa := passwordAuth(env, predicted)
-			if !s.DryRun() {
-				_, now := installed(s, akPath)
-				pa = passwordAuth(env, len(now))
-			}
-			return applyConfig(ctx, s, env, pa, socket)
+			return applyConfig(ctx, s, env, passwordAuth(env), socket)
 		},
 	})
 	return acts, nil

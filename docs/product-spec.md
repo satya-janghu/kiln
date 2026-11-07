@@ -45,11 +45,11 @@ The wizard applies changes only on Linux, and only if `/etc/kiln/allow-apply` ex
 
 ## Defaults: everything on
 
-- Every kiln step and sub-option starts checked. That includes the NVIDIA driver, trixie-backports, NetworkManager migration, zram, fail2ban, auto-updates, firmware updates, Flathub and the third-party repos.
+- Every kiln step and sub-option starts checked. That includes the NVIDIA driver, trixie-backports, zram, fail2ban, auto-updates, firmware updates, Flathub and the third-party repos.
 - **One exception:** the backports kernel starts **off**. Every machine runs Debian's stock trixie kernel (6.12 LTS, kept on the latest version by normal upgrades) unless you select the backports kernel for that machine (D38).
 - A step that doesn't fit this machine stays checked but shows `not applicable: <reason>` and is skipped. The reason can be hardware (no NVIDIA GPU, no battery) or an installer choice (no GNOME, no SSH server).
 - To turn things off quickly, toggle a single item, toggle a whole category, or filter by text.
-- "On by default" doesn't mean reckless. Network migration and SSH changes are validated first, checked after applying, and reverted automatically if the check fails.
+- "On by default" doesn't mean reckless. SSH changes are validated first, checked after applying, and reverted automatically if the check fails.
 
 ## Secrets
 

@@ -78,7 +78,7 @@ kiln is ready for production when all of the following hold:
 | upgrade | implemented | | |
 | firmware-packages | implemented | | |
 | kernel | implemented | | |
-| network-migration | implemented | | |
+| network-migration | removed (D52) | | |
 | multimedia | implemented | | |
 | repos | implemented | | |
 | devtools | implemented | | |

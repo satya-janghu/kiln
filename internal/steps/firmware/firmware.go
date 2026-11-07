@@ -52,8 +52,6 @@ func (Step) Options(*facts.Facts) []options.Field {
 	return []options.Field{
 		{Key: "microcode", Label: "CPU microcode", Kind: options.Bool, Default: true,
 			Help: "amd64-microcode or intel-microcode, whichever matches the CPU."},
-		{Key: "nonfree_firmware", Label: "Non-free firmware", Kind: options.Bool, Default: true,
-			Help: "GPU, Wi-Fi and network firmware matched to the detected hardware."},
 	}
 }
 
@@ -64,8 +62,9 @@ type Selection struct {
 	Report    bool     // install isenkram-cli and report missing firmware
 }
 
-// Select picks packages from the detected hardware.
-func Select(f *facts.Facts, microcode, nonfree bool) Selection {
+// Select picks packages from the detected hardware. Non-free firmware is
+// always included (D52): the owner always wants non-free enabled.
+func Select(f *facts.Facts, microcode bool) Selection {
 	var sel Selection
 	if microcode {
 		switch f.CPU.Vendor {
@@ -74,9 +73,6 @@ func Select(f *facts.Facts, microcode, nonfree bool) Selection {
 		case "Intel":
 			sel.Microcode = []string{"intel-microcode"}
 		}
-	}
-	if !nonfree {
-		return sel
 	}
 	sel.Report = true
 	seen := map[string]bool{}
@@ -138,7 +134,7 @@ func isRealtek(n facts.NIC) bool {
 
 // SelectFor applies the step's options from a resolved option set.
 func SelectFor(f *facts.Facts, o options.View) Selection {
-	return Select(f, o.Bool("microcode"), o.Bool("nonfree_firmware"))
+	return Select(f, o.Bool("microcode"))
 }
 
 func (sel Selection) all() []string {

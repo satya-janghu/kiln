@@ -30,8 +30,8 @@ func (Step) ID() string       { return "cockpit" }
 func (Step) Title() string    { return "Cockpit web console" }
 func (Step) Category() string { return "apps" }
 
-// DependsOn lists hard dependencies only; network-migration is soft (the
-// networking page needs NetworkManager, but Cockpit works without it).
+// DependsOn lists hard dependencies only. Cockpit's networking page can edit
+// only NetworkManager interfaces; kiln leaves networking as installed (D52).
 func (Step) DependsOn() []string { return []string{"apt-sources"} }
 
 func (Step) Packages() []step.PackageRef {

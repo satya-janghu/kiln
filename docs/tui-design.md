@@ -73,7 +73,7 @@ Other layout rules:
 
 These checks run in this order, each only when it applies:
 1. **Another kiln is running:** "kiln is already running (pid N). [l] view its log  [q] quit". Nothing else is possible.
-2. **Interrupted change** (`state.json` has `pending`): "A network change didn't finish last time. Revert it now? [y/n]".
+2. **Interrupted change** (`state.json` has `pending`): "A change didn't finish last time. Revert it now? [y/n]".
 3. **Interrupted run:** "The last run stopped during *Docker* (14:22, power lost?). kiln will repair the package system and then run again; every step is safe to repeat." If dpkg was interrupted, the repair runs with its own progress view.
 4. **On battery below 30%:** "Plug in the charger. A run that loses power while installing packages can break the system. [c] continue anyway".
 

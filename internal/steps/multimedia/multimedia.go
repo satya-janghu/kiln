@@ -19,7 +19,8 @@ import (
 var (
 	codecsAll   = []string{"libavcodec-extra"}
 	codecsGNOME = []string{"gstreamer1.0-plugins-good", "gstreamer1.0-plugins-bad", "gstreamer1.0-plugins-ugly", "gstreamer1.0-libav"}
-	vaAMD       = []string{"mesa-va-drivers", "vainfo"}
+	vaAMD       = []string{"mesa-va-drivers"}
+	vaInfo      = "vainfo" // for every GPU vendor (D51)
 	dvdDebconf  = []string{
 		"libdvd-pkg libdvd-pkg/build boolean true",
 		"libdvd-pkg libdvd-pkg/post-invoke_hook-install boolean true",
@@ -73,7 +74,7 @@ func (Step) Packages() []step.PackageRef {
 		return step.PackageRef{Name: n, Suite: "trixie", Component: comp, Repo: "debian"}
 	}
 	var out []step.PackageRef
-	for _, p := range append(append(append([]string{}, codecsAll...), codecsGNOME...), vaAMD...) {
+	for _, p := range append(append(append([]string{}, codecsAll...), codecsGNOME...), append(vaAMD, vaInfo)...) {
 		out = append(out, deb(p, "main"))
 	}
 	out = append(out,
@@ -168,6 +169,9 @@ func wanted(ctx context.Context, env *step.Env) []string {
 		}
 	}
 	if env.Opts.Bool("vaapi") {
+		if len(env.Facts.GPUs) > 0 {
+			pkgs = append(pkgs, vaInfo)
+		}
 		if env.Facts.HasGPUVendor("1002") {
 			pkgs = append(pkgs, vaAMD...)
 		}

@@ -50,9 +50,8 @@ func (Step) Options(*facts.Facts) []options.Field {
 				}
 				return errors.New("use a two-letter country code such as IN or DE, or auto")
 			}},
-		{Key: "neighbors", Label: "Include neighboring countries", Kind: options.Bool, Default: true},
 		{Key: "sample", Label: "Worldwide sample", Kind: options.Int, Default: 4,
-			Help: "Random mirrors from outside the region.", Validate: intRange(0, 50, "mirrors")},
+			Help: "Random mirrors from other countries; a farther mirror can be faster.", Validate: intRange(0, 50, "mirrors")},
 		{Key: "top", Label: "Mirrors to keep", Kind: options.Int, Default: 5,
 			Help:     "The fastest N share priority 1, so apt spreads downloads across them; deb.debian.org is the fallback.",
 			Validate: intRange(1, 20, "mirrors")},
@@ -81,7 +80,7 @@ func timezone(env *step.Env) string {
 func (s Step) opts(env *step.Env) mirrors.BenchOpts {
 	v := env.Opts
 	return mirrors.BenchOpts{
-		Country: v.String("country"), Neighbors: v.Bool("neighbors"), Sample: v.Int("sample"),
+		Country: v.String("country"), Sample: v.Int("sample"),
 		Top: v.Int("top"), TestBytes: int64(v.Int("test_mb")) << 20, Timeout: v.Int("test_seconds"),
 		Timezone: timezone(env),
 		Say: func(t string) {
@@ -120,9 +119,6 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 	where := "the country from the timezone"
 	if !strings.EqualFold(o.Country, "auto") {
 		where = strings.ToUpper(o.Country)
-	}
-	if o.Neighbors {
-		where += " and its neighbors"
 	}
 	var results []mirrors.Result
 	var prev mirrors.PrevList // the mirror list before this run's write

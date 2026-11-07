@@ -69,7 +69,7 @@ Every action is a typed value with `Describe() string` (used for the review scre
 - **System settings:** `UserAddGroup`, `Sysctl`, `SysfsWrite`.
 - **Downloads:** steps call `sys.System.Fetch` (sha256-verified, into the run's private directory) inside `Custom` actions; piped installers are a pinned Fetch followed by `bash <file>` as the user.
 - **Commands:** `Command{Name, Args, Stdin, AsUser, Env}`. `Stdin` is how secrets are passed (never in argv).
-- **`Custom{Desc, Fn}`:** for steps that need runtime feedback, such as the battery ladder, the mirror bench and network migration. Its `Desc` must still say exactly what it will try.
+- **`Custom{Desc, Fn}`:** for steps that need runtime feedback, such as the battery ladder and the mirror bench. Its `Desc` must still say exactly what it will try.
 
 ### Why the preview can't drift (rule 7)
 
@@ -105,7 +105,6 @@ kiln changes a live system for 15–40 minutes, and anything can happen in that 
   - `fail2ban-client ping`: up to 30 s;
   - `docker info`: up to 60 s;
   - NetworkManager activation, using `nmcli --wait`: up to 90 s;
-  - the network check after migration: up to 60 s;
   - `cockpit.socket` active: up to 15 s.
 
   A deadline that runs out counts as a failed check, which triggers the step's revert or `failed`.
@@ -155,7 +154,7 @@ kiln may run inside GNOME Terminal. Closing that window, logging out, or a displ
 - **Run record.** `state.json` has a `run` record: `{started, step, action, finished}`. It's written, atomically, before each step starts and when it ends.
 - **Next start finds it unfinished.** The wizard says "The last run stopped during <step> (<reason if known>)". It repairs first, then offers to run again. Every step is idempotent, so re-running is the resume.
 - **Repair before anything else**, in this order, before the internet check:
-  1. **The `pending` revert prompt** for risky changes, because a half-migrated network would otherwise fail the internet check.
+  1. **The `pending` revert prompt** for risky changes, so a half-applied change is undone before anything else runs.
   2. **Interrupted dpkg.** If `dpkg --audit` prints anything (it always exits 0, so kiln checks the output), or `/var/lib/dpkg/updates/` contains an all-digit file name (apt's "dpkg was interrupted" test), run `dpkg --configure -a` then `apt-get -f install -y`, both through the apt helper.
   3. **Stale runtime masks** from a crash are removed, unless another kiln is running. A reboot clears them anyway.
 - **Single instance.** kiln takes an exclusive `flock` on `/run/kiln/kiln.lock` for the whole wizard run. A second `kiln` shows "kiln is already running (pid N)", and offers to show the log, read-only.
@@ -193,14 +192,14 @@ kiln may run inside GNOME Terminal. Closing that window, logging out, or a displ
 
 ## Risky changes: verify, then revert on failure
 
-Network migration and SSH changes go through `internal/revert`. You're at the console, so there's no remote session to protect, and the danger is a box that's left half-configured. The pattern is:
+SSH changes go through `internal/revert`. You're at the console, so there's no remote session to protect, and the danger is a box that's left half-configured. The pattern is:
 
 1. **Validate offline first:** `sshd -t` and a parsed-back check of NetworkManager profiles.
 2. **Record a `pending` entry in `state.json`,** with the backups (paths under `/var/lib/kiln/backup/`) and how to undo the change.
 3. **Apply the change in place,** using reload where possible.
-4. **Check it locally.** For SSH, `sshd` is listening on the configured port and `sshd -T` shows the expected values. For the network, the link is up, the default route exists, DNS resolves, and HTTPS to `deb.debian.org` works.
+4. **Check it locally.** For SSH, `sshd` is listening on the configured port and `sshd -T` shows the expected values.
 5. **If the check passes,** clear `pending`. **If it fails,** restore the backups, restart the previous service, clear `pending`, and record `failed` with what to try.
-6. **If kiln died mid-change,** the next start finds `pending`. Before anything else, the wizard offers "A network change didn't finish. Revert it?".
+6. **If kiln died mid-change,** the next start finds `pending`. Before anything else, the wizard offers "A change didn't finish last time. Revert it?".
 
 ## Safety gate
 

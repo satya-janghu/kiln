@@ -82,9 +82,14 @@ type ProfileReport struct {
 	Detail string
 }
 
-// VerifyProfile checks that the platform profile is `performance` wherever it's offered.
-// On kernels ≥ 6.14 the legacy file reads `custom` when handlers disagree; that
-// counts as "not performance" and the per-handler values are reported.
+// WantProfile is the platform profile the power manager sets: both
+// power-profiles-daemon and tuned use "balanced" for their balanced profile
+// (D52; ppd 0.30 ppd-driver-platform-profile.c, tuned 2.25.1 balanced).
+const WantProfile = "balanced"
+
+// VerifyProfile checks that the platform profile is WantProfile wherever it's
+// offered. On kernels ≥ 6.14 the legacy file reads `custom` when handlers
+// disagree; that counts as a difference and the per-handler values are reported.
 func VerifyProfile(s sys.System) ProfileReport {
 	choicesRaw, ok := read(s, choicesPath)
 	if !ok {
@@ -92,11 +97,11 @@ func VerifyProfile(s sys.System) ProfileReport {
 	}
 	choices := strings.Fields(choicesRaw)
 	cur, _ := read(s, profilePath)
-	if !contains(choices, "performance") {
-		return ProfileReport{OK: true, Detail: fmt.Sprintf("platform profile %s (performance isn't offered: %s)", cur, choicesRaw)}
+	if !contains(choices, WantProfile) {
+		return ProfileReport{OK: true, Detail: fmt.Sprintf("platform profile %s (%s isn't offered: %s)", cur, WantProfile, choicesRaw)}
 	}
-	if cur == "performance" {
-		return ProfileReport{OK: true, Detail: "platform profile performance"}
+	if cur == WantProfile {
+		return ProfileReport{OK: true, Detail: "platform profile " + WantProfile}
 	}
 	if cur == "custom" {
 		var per []string
@@ -112,11 +117,12 @@ func VerifyProfile(s sys.System) ProfileReport {
 		}
 		return ProfileReport{Detail: "platform profile reads custom (handlers disagree: " + strings.Join(per, ", ") + ")"}
 	}
-	return ProfileReport{Detail: "platform profile is " + orUnknown(cur) + ", expected performance"}
+	return ProfileReport{Detail: "platform profile is " + orUnknown(cur) + ", expected " + WantProfile}
 }
 
 // AMDReport describes amd-pstate's mode and the per-policy EPP. notes lists
-// differences from what the performance profile sets (EPP performance).
+// differences from what the balanced profiles set: EPP balance_performance
+// (tuned balanced; ppd balanced on AC), or balance_power (ppd on battery).
 func AMDReport(s sys.System, f *facts.Facts) (detail string, notes []string) {
 	if f.CPU.Vendor != "AMD" {
 		return "", nil
@@ -143,8 +149,8 @@ func AMDReport(s sys.System, f *facts.Facts) (detail string, notes []string) {
 	sort.Strings(keys)
 	detail += ", EPP " + strings.Join(keys, "/")
 	for _, k := range keys {
-		if k != "performance" {
-			notes = append(notes, fmt.Sprintf("CPU energy preference (EPP) is %q on %s, not performance; the power manager sets it with the performance profile (amd-pstate %s mode). kiln doesn't change the kernel command line.",
+		if k != "balance_performance" && k != "balance_power" {
+			notes = append(notes, fmt.Sprintf("CPU energy preference (EPP) is %q on %s, not balance_performance; the power manager sets it with the balanced profile (amd-pstate %s mode). kiln doesn't change the kernel command line.",
 				k, strings.Join(values[k], ", "), status))
 		}
 	}

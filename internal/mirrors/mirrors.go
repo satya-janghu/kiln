@@ -43,7 +43,6 @@ const (
 // BenchOpts controls a benchmark.
 type BenchOpts struct {
 	Country   string // ISO code or "auto"
-	Neighbors bool
 	Sample    int
 	Top       int
 	TestBytes int64
@@ -116,7 +115,7 @@ var (
 )
 
 // Candidates parses the masterlist and selects mirrors (catalog step 3.1).
-func Candidates(ctx context.Context, s sys.System, cc string, withNeighbors bool, sample int) ([]Mirror, error) {
+func Candidates(ctx context.Context, s sys.System, cc string, sample int) ([]Mirror, error) {
 	b, err := s.HTTPGet(ctx, MasterlistURL, 16<<20)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't download the Debian mirror list (%w); check the network, or keep deb.debian.org by unticking this step", err)
@@ -124,11 +123,6 @@ func Candidates(ctx context.Context, s sys.System, cc string, withNeighbors bool
 	region := map[string]bool{}
 	if cc != "" {
 		region[cc] = true
-		if withNeighbors {
-			for _, n := range neighbors(cc) {
-				region[n] = true
-			}
-		}
 	}
 	seen := map[string]bool{"deb.debian.org": true}
 	var local, others []Mirror
@@ -378,7 +372,7 @@ func Rank(ctx context.Context, s sys.System, f *facts.Facts, o BenchOpts, backpo
 	case cc == "":
 		o.say("Timezone %q isn't in kiln's table; testing a worldwide sample and deb.debian.org", zone)
 	}
-	cands, err := Candidates(ctx, s, cc, o.Neighbors, o.Sample)
+	cands, err := Candidates(ctx, s, cc, o.Sample)
 	if err != nil {
 		return nil, err
 	}

@@ -19,15 +19,20 @@ import (
 )
 
 const (
-	logindDropIn     = "/etc/systemd/logind.conf.d/60-kiln-always-on.conf"
-	dconfProfile     = "/etc/dconf/profile/user"
-	dconfKeys        = "/etc/dconf/db/local.d/60-kiln-power"
-	dconfLocks       = "/etc/dconf/db/local.d/locks/60-kiln-power"
-	dconfDB          = "/etc/dconf/db/local"
-	greeterPath      = "/etc/gdm3/greeter.dconf-defaults"
-	powerSection     = "org/gnome/settings-daemon/plugins/power"
-	tunedProfileName = "kiln-performance"
-	tunedProfile     = "/etc/tuned/profiles/kiln-performance/tuned.conf"
+	logindDropIn = "/etc/systemd/logind.conf.d/60-kiln-always-on.conf"
+	dconfProfile = "/etc/dconf/profile/user"
+	dconfKeys    = "/etc/dconf/db/local.d/60-kiln-power"
+	dconfLocks   = "/etc/dconf/db/local.d/locks/60-kiln-power"
+	dconfDB      = "/etc/dconf/db/local"
+	greeterPath  = "/etc/gdm3/greeter.dconf-defaults"
+	powerSection = "org/gnome/settings-daemon/plugins/power"
+	// tunedProfileName is trixie's stock tuned profile (D52): schedutil,
+	// EPP balance_performance, platform_profile balanced (tuned 2.25.1
+	// /usr/lib/tuned/profiles/balanced/tuned.conf).
+	tunedProfileName = "balanced"
+	// oldTunedProfile is the custom profile earlier kiln versions wrote; it's
+	// kiln's own file, so it's removed.
+	oldTunedProfile = "/etc/tuned/profiles/kiln-performance"
 
 	ppd      = "power-profiles-daemon"
 	tuned    = "tuned"
@@ -62,11 +67,11 @@ func (Step) Options(*facts.Facts) []options.Field {
 		{Key: "lock_gnome_settings", Label: "Lock GNOME no-suspend settings", Kind: options.Bool, Default: true,
 			Help: "GNOME only: GNOME Settings can't turn automatic suspend back on."},
 		{Key: "power_manager", Label: "Power manager", Kind: options.Choice, Default: "auto",
-			Help: "auto = power-profiles-daemon with GNOME, tuned (kiln-performance profile) without it. Never both.",
+			Help: "auto = power-profiles-daemon with GNOME, tuned without it, both on their balanced profile (D52). Never both.",
 			Choices: []options.ChoiceItem{
 				{Value: "auto", Label: "Automatic"},
 				{Value: ppd, Label: "power-profiles-daemon"},
-				{Value: tuned, Label: "tuned (kiln-performance)"},
+				{Value: tuned, Label: "tuned (balanced)"},
 			}},
 	}
 }
@@ -195,15 +200,6 @@ func editGreeter(content string) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func tunedContent() []byte {
-	return []byte(sys.ManagedHeader("#") + `[main]
-include=throughput-performance
-
-[sysctl]
-vm.swappiness=60
-`)
-}
-
 // --- reads ---
 
 func fileIs(s sys.System, path string, want []byte) bool {
@@ -248,15 +244,6 @@ func ppdProfiles(out string) []string {
 		}
 	}
 	return p
-}
-
-func contains(l []string, v string) bool {
-	for _, x := range l {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 func tunedActive(ctx context.Context, s sys.System) string {
@@ -330,14 +317,10 @@ func managerPart(ctx context.Context, env *step.Env) part {
 		if apt.Installed(ctx, s, tuned) {
 			return todo("tuned is installed alongside power-profiles-daemon")
 		}
-		cur := query(ctx, s, "powerprofilesctl", "get")
-		if cur == "performance" {
-			return good
+		if cur := query(ctx, s, "powerprofilesctl", "get"); cur != "balanced" {
+			return todo("the power profile is %q, not balanced", cur)
 		}
-		if !contains(ppdProfiles(query(ctx, s, "powerprofilesctl", "list")), "performance") && cur == "balanced" {
-			return good // the noted fallback
-		}
-		return todo("the power profile is %q, not performance", cur)
+		return good
 	default:
 		if !apt.Installed(ctx, s, tuned) {
 			return todo("tuned isn't installed")
@@ -345,8 +328,8 @@ func managerPart(ctx context.Context, env *step.Env) part {
 		if apt.Installed(ctx, s, ppd) {
 			return todo("power-profiles-daemon is installed alongside tuned")
 		}
-		if !fileIs(s, tunedProfile, tunedContent()) {
-			return todo("%s is missing or different", tunedProfile)
+		if _, err := s.Lstat(oldTunedProfile); err == nil {
+			return todo("kiln's old kiln-performance profile is still there")
 		}
 		if a := tunedActive(ctx, s); a != tunedProfileName {
 			return todo("the tuned profile is %q, not %s", a, tunedProfileName)
@@ -440,7 +423,7 @@ func managerActions(ctx context.Context, env *step.Env) []action.Action {
 			acts = append(acts, action.AptInstall{Pkgs: []string{ppd}})
 		}
 		acts = append(acts, action.Custom{
-			Desc: "set the power profile with `powerprofilesctl set performance` (the choice persists in /var/lib/power-profiles-daemon/state.ini); if performance isn't offered, keep balanced and note it",
+			Desc: "set the power profile with `powerprofilesctl set balanced` (the choice persists in /var/lib/power-profiles-daemon/state.ini)",
 			K:    action.Services,
 			Fn:   func(ctx context.Context, s sys.System) error { return setPPD(ctx, env, s) },
 		})
@@ -458,9 +441,18 @@ func managerActions(ctx context.Context, env *step.Env) []action.Action {
 			acts = append(acts, action.AptInstall{Pkgs: []string{tuned}})
 		}
 		acts = append(acts,
-			action.WriteFile{Path: tunedProfile, Content: tunedContent(), Mode: 0o644},
 			action.Custom{
-				Desc: "wait for tuned to be running, then select kiln's profile (tuned-adm profile " + tunedProfileName + ")",
+				Desc: "remove kiln's old " + oldTunedProfile + " profile if it's there",
+				K:    action.Files,
+				Fn: func(_ context.Context, s sys.System) error {
+					if _, err := s.Lstat(oldTunedProfile); err != nil {
+						return nil
+					}
+					return s.RemoveAll(oldTunedProfile)
+				},
+			},
+			action.Custom{
+				Desc: "wait for tuned to be running, then select trixie's balanced profile (tuned-adm profile " + tunedProfileName + ")",
 				K:    action.Services,
 				Fn: func(ctx context.Context, s sys.System) error {
 					if !s.DryRun() {
@@ -502,7 +494,7 @@ func waitActive(ctx context.Context, s sys.System, unit string, d time.Duration)
 
 func setPPD(ctx context.Context, env *step.Env, s sys.System) error {
 	if s.DryRun() {
-		_, err := s.Run(ctx, sys.Cmd{Name: "powerprofilesctl", Args: []string{"set", "performance"}})
+		_, err := s.Run(ctx, sys.Cmd{Name: "powerprofilesctl", Args: []string{"set", "balanced"}})
 		return err
 	}
 	// "started" isn't "ready": poll until the daemon answers.
@@ -522,11 +514,7 @@ func setPPD(ctx context.Context, env *step.Env, s sys.System) error {
 		case <-time.After(time.Second):
 		}
 	}
-	want := "performance"
-	if !contains(list, want) {
-		want = "balanced"
-		env.Notes.Add("power-profiles-daemon doesn't offer the performance profile on this machine (offered: %s), so it stays on balanced.", strings.Join(list, ", "))
-	}
+	want := "balanced" // always offered (ppd 0.30)
 	if query(ctx, s, "powerprofilesctl", "get") == want {
 		return nil
 	}

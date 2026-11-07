@@ -156,15 +156,13 @@ func (n *Notes) All() (notes, warnings, reboot []string) {
 }
 
 // Categories in display order.
-var Categories = []string{"base", "network", "hardware", "media", "apps", "power", "security", "dev"}
+var Categories = []string{"base", "hardware", "media", "apps", "power", "security", "dev"}
 
 // CategoryTitle is the plain-language group name.
 func CategoryTitle(c string) string {
 	switch c {
 	case "base":
 		return "Base system"
-	case "network":
-		return "Network"
 	case "hardware":
 		return "Hardware and firmware"
 	case "media":

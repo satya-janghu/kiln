@@ -17,7 +17,6 @@ import (
 	"github.com/satya-janghu/kiln/internal/steps/kernel"
 	"github.com/satya-janghu/kiln/internal/steps/mirrors"
 	"github.com/satya-janghu/kiln/internal/steps/multimedia"
-	"github.com/satya-janghu/kiln/internal/steps/netmigrate"
 	"github.com/satya-janghu/kiln/internal/steps/node"
 	"github.com/satya-janghu/kiln/internal/steps/power"
 	"github.com/satya-janghu/kiln/internal/steps/preflight"
@@ -40,7 +39,6 @@ func Steps() []step.Step {
 		upgrade.New(),
 		firmware.New(),
 		kernel.New(),
-		netmigrate.New(),
 		multimedia.New(),
 		repos.New(),
 		devtools.New(),
