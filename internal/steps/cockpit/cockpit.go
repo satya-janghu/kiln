@@ -91,7 +91,9 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		env.Notes.Add("Cockpit %s from trixie-backports stays installed; kiln doesn't downgrade it to trixie's version.", v)
 	}
 	// Recommends are kept: cockpit-networkmanager is the networking page (D37).
-	acts = append(acts, action.AptInstall{Pkgs: []string{"cockpit"}, Suite: suite})
+	// It's named too, because apt installs no Recommends for a package that's
+	// already installed, and Check requires it.
+	acts = append(acts, action.AptInstall{Pkgs: []string{"cockpit", "cockpit-networkmanager"}, Suite: suite})
 	env.Notes.Warn("Cockpit's recommended packages pull in network-manager, packagekit and udisks2.")
 	acts = append(acts, action.Custom{
 		Desc: "check that " + socket + " (installed and started by the package) is enabled and active, waiting up to 15 s",

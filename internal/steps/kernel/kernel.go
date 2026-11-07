@@ -119,10 +119,11 @@ func fromBackports(v policyVersion) bool {
 	return false
 }
 
-// installedFromBackports reports whether the installed metapackage is a backports version.
-// Any installed version carrying trixie-backports' "~bpo13" suffix counts, even
-// once a newer backports upload has dropped it from the index.
-func installedFromBackports(ctx context.Context, s sys.System) (bool, string) {
+// InstalledFromBackports reports whether the installed linux-image-amd64 is a
+// backports version, and that version. Any installed version carrying
+// trixie-backports' "~bpo13" suffix counts, even once a newer backports upload
+// has dropped it from the index. multimedia uses it for the headers suite.
+func InstalledFromBackports(ctx context.Context, s sys.System) (bool, string) {
 	if v := apt.InstalledVersion(ctx, s, image); strings.Contains(v, "~bpo13") {
 		return true, v
 	}
@@ -144,10 +145,39 @@ func backportsCandidate(ctx context.Context, s sys.System) string {
 }
 
 func (Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
-	if ok, ver := installedFromBackports(ctx, env.Sys); ok {
-		return step.Done("backports kernel metapackage " + ver + " installed"), nil
+	ok, ver := InstalledFromBackports(ctx, env.Sys)
+	if !ok {
+		return step.Todo("%s isn't installed from %s", image, suite), nil
 	}
-	return step.Todo("%s isn't installed from %s", image, suite), nil
+	// Everything Plan installs from backports, so a part that failed (or an
+	// option turned on later) is retried, not reported as unchanged.
+	var parts []string
+	if len(env.Facts.NVIDIA()) > 0 {
+		parts = append(parts, headers)
+	}
+	if env.Opts.Bool("backports_firmware") {
+		parts = append(parts, firmware.SelectFor(env.Facts, env.All.For(firmware.ID)).Firmware...)
+	}
+	for _, p := range parts {
+		if !fromBackportsIfOffered(ctx, env.Sys, p) {
+			return step.Todo("%s isn't installed from %s", p, suite), nil
+		}
+	}
+	return step.Done("backports kernel metapackage " + ver + " installed"), nil
+}
+
+// fromBackportsIfOffered: pkg is installed from trixie-backports, or
+// trixie-backports doesn't offer it (then trixie's version is what Plan gets).
+func fromBackportsIfOffered(ctx context.Context, s sys.System, pkg string) bool {
+	if strings.Contains(apt.InstalledVersion(ctx, s, pkg), "~bpo13") {
+		return true
+	}
+	for _, v := range parsePolicy(apt.Policy(ctx, s, pkg)) {
+		if fromBackports(v) {
+			return false // offered, but not what's installed
+		}
+	}
+	return true
 }
 
 // nvidiaDebianStock reports the multimedia step will use Debian's 550 driver.
@@ -199,7 +229,7 @@ func (Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
 		Fn: func(ctx context.Context, s sys.System) error {
 			ver := backportsCandidate(ctx, s)
 			if !s.DryRun() {
-				if ok, v := installedFromBackports(ctx, s); ok {
+				if ok, v := InstalledFromBackports(ctx, s); ok {
 					ver = v
 				}
 			}

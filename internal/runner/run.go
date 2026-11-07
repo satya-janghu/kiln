@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/satya-janghu/kiln/internal/apt"
 	"github.com/satya-janghu/kiln/internal/step"
 	"github.com/satya-janghu/kiln/internal/sys"
 )
@@ -48,6 +49,12 @@ func (r *Runner) safe(what string, fn func()) {
 // inhibitor, saving state) always run, even after a panic.
 func (r *Runner) Run(ctx context.Context) *Summary {
 	sum := &Summary{Started: time.Now()}
+	// Per-run apt settings: the lock wait chosen in this wizard session (not
+	// just last run's), and a fresh "lists refreshed this run" flag.
+	if v, ok := r.Opts.Values["apt-sources.lock_wait"].(int); ok && v > 0 {
+		apt.LockWait = time.Duration(v) * time.Minute
+	}
+	apt.UpdatedThisRun.Store(false)
 	r.results = map[string]*StepResult{}
 	r.Notes = &step.Notes{}
 	lc := newLifecycle(r)

@@ -3,6 +3,7 @@ package firmware
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -115,6 +116,22 @@ func Select(f *facts.Facts, microcode bool) Selection {
 			add("firmware-brcm80211")
 		}
 	}
+	// Wi-Fi cards on PCI, also those whose driver failed for lack of firmware
+	// and so have no network interface yet: match by vendor (pci.ids).
+	for _, w := range f.WiFiPCI {
+		switch w.Vendor {
+		case "8086":
+			add("firmware-iwlwifi")
+		case "14c3":
+			add("firmware-mediatek")
+		case "10ec":
+			add("firmware-realtek")
+		case "168c", "17cb":
+			add("firmware-atheros")
+		case "14e4":
+			add("firmware-brcm80211")
+		}
+	}
 	return sel
 }
 
@@ -124,7 +141,8 @@ func isRealtek(n facts.NIC) bool {
 	if n.Vendor == "10ec" {
 		return true
 	}
-	for _, p := range []string{"r8169", "r8152", "rtw88", "rtw89", "rtl8"} {
+	// rtw88 drivers register as rtw_<chip> (rtw_8822ce), rtw89 as rtw89_<chip>.
+	for _, p := range []string{"r8169", "r8152", "rtw_", "rtw89", "rtl8"} {
 		if strings.HasPrefix(n.Driver, p) {
 			return true
 		}
@@ -180,9 +198,15 @@ func (Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
 	}
 	if newFirmware {
 		// The firmware triggers rebuild only the newest kernel's initramfs.
-		acts = append(acts, action.Run{
-			Cmd:  sys.Cmd{Name: "update-initramfs", Args: []string{"-u", "-k", "all"}, Timeout: 20 * time.Minute},
+		acts = append(acts, action.Custom{
 			Desc: "rebuild the initramfs of every installed kernel (update-initramfs -u -k all) so each one boots with the new firmware",
+			K:    action.Commands,
+			Fn: func(ctx context.Context, s sys.System) error {
+				if _, err := s.Run(ctx, sys.Cmd{Name: "update-initramfs", Args: []string{"-u", "-k", "all"}, Timeout: 20 * time.Minute}); err != nil {
+					return fmt.Errorf("the firmware is installed, but the initramfs couldn't be rebuilt (%w); this is often a full /boot. Free space in /boot, then run `sudo update-initramfs -u -k all`", err)
+				}
+				return nil
+			},
 		})
 	}
 	for _, m := range sel.Microcode {

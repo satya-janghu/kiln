@@ -83,7 +83,7 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		env.Notes.Warn("This looks like a virtual machine (%s). kiln is meant for bare metal; hardware steps may not apply.", f.Virt)
 	}
 	if f.SSHSession {
-		env.Notes.Warn("You're connected over SSH. Network and firewall steps may disconnect you; kiln is meant to be run at the machine.")
+		env.Notes.Warn("You're connected over SSH. The SSH step may disconnect you; kiln is meant to be run at the machine.")
 	}
 	var acts []action.Action
 	if ok, missing := apt.AllInstalled(ctx, env.Sys, prerequisites); !ok {

@@ -592,6 +592,46 @@ Field observations so far are in debian13-notes.md, "Field observations".
 - **Non-free:** always on. The `firmware-packages.nonfree_firmware` option is gone, so non-free firmware and the isenkram report are always included; apt-sources already always enables `non-free non-free-firmware`.
 - **Kept as they are:** the battery, watcher and fallback choices; the Intel driver for any Intel GPU; the Secure Boot one-time password handling; and the three app items (Cockpit not downgraded, fd/bat left alone, other extrepo repos only enabled).
 
+### D53 · 2026-11-07 · Step-review round: forced fixes
+
+**Status: forced.** These came from the per-step reviews. Each is the only way to meet the catalog or an engineering rule; owner questions from the same round are asked separately.
+
+- **preflight (blocker):** under plain `su`, kiln now really puts `/usr/local/sbin:/usr/sbin:/sbin` on PATH before anything runs. The note already claimed it did; without it, `sshd`, `visudo` and `chpasswd` weren't found.
+- **revert:** a step whose earlier change is still pending keeps its first snapshot instead of re-snapshotting half-applied files.
+- **ssh:**
+  - applies with `reload-or-restart`, so an enabled but stopped sshd no longer fails;
+  - its warnings show on every run (catalog: "the review screen and summary warn");
+  - it warns when another file's `Port` means sshd won't listen on 22;
+  - the undo advice names the right command.
+- **sudo:** reports when an earlier NOPASSWD file still applies, instead of claiming "with a password".
+- **go:**
+  - an interrupted swap no longer loses the only working Go: `go.kiln-old` is put back, and leftovers make `Check` re-plan;
+  - "Update tools on this run" is really per-run (never saved, rule 2).
+- **node:** the nvm helper script is fed on bash's stdin, so a cleared `~/.cache` no longer makes a configured machine look unconfigured.
+- **multimedia:**
+  - the libdvdcss2 build waits for the dpkg lock (rule 9), and a build that quietly didn't happen becomes a note (D44);
+  - DKMS on an *older* kernel no longer counts as built;
+  - Intel machines get the non-free VA-API driver even when GNOME already pulled in main's;
+  - kernel headers follow the installed kernel metapackage's suite, not the kernel step's checkbox.
+- **cockpit:** installs `cockpit-networkmanager` explicitly, because Check requires it.
+- **firmware-packages:**
+  - Realtek rtw88 drivers match as `rtw_*`;
+  - Wi-Fi cards are also found on the PCI bus, by vendor, since a card missing firmware has no network interface;
+  - an `update-initramfs` failure says what to do.
+- **kernel:** Check also requires the backports headers and firmware it installs, so failed parts are retried.
+- **power:** a stopped or disabled tuned or power-profiles-daemon is started, and the old kiln profile is removed on both paths.
+- **thermal:** the not-applicable reason names a missing sensor when that's the cause.
+- **battery:**
+  - only batteries that took the limit are recorded;
+  - reapply writes nothing when the thresholds already hold;
+  - helpers log at Info, so the log doesn't grow by every read many times a day.
+- **apt:**
+  - the lock wait chosen in the wizard applies to that same run;
+  - the "lists refreshed this run" flag resets per run;
+  - apt-sources checks `Signed-By` only on files modernize converted.
+- **mirrors:** `kiln mirrors bench --apply` and `reset` respect the apply gate (rule 1) and the run lock.
+- **Docs:** stale firewall and NetworkManager text was removed; new V rows for dpkg version comparison, tuned and ppd balanced, chpasswd and PCI Wi-Fi IDs.
+
 ## Proposals from the second verification pass
 
 **Status:** you accepted all of these on 2026-11-07 as written (the "current text" option), except P1 and P14, which D38 replaces. They're kept here as a record of the choices and the alternatives.

@@ -89,7 +89,7 @@ func (Step) Options(*facts.Facts) []options.Field {
 				}
 				return nil
 			}},
-		{Key: "update_tools", Label: "Update tools on this run", Kind: options.Bool, Default: false,
+		{Key: "update_tools", Label: "Update tools on this run", Kind: options.Bool, Default: false, PerRun: true,
 			Help: "Off by design: on re-installs every tool @latest, so a second run would change something (P4)."},
 	}
 }
@@ -240,6 +240,12 @@ func fileIs(s sys.System, path string, want []byte) bool {
 }
 
 func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
+	// An interrupted swap leaves go.kiln-new or go.kiln-old behind (D41).
+	for _, d := range []string{goNew, goOld} {
+		if _, err := env.Sys.Lstat(d); err == nil {
+			return step.Todo("%s is left over from an interrupted run", d), nil
+		}
+	}
 	want := env.Opts.String("version")
 	rel, err := resolve(ctx, env.Sys, want)
 	detail := ""
@@ -284,9 +290,17 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 	want := env.Opts.String("version")
 	var acts []action.Action
 
-	// Leftovers from an interrupted swap are removed first (D41).
+	// Leftovers from an interrupted swap (D41). If kiln died between the two
+	// renames there is no /usr/local/go, and go.kiln-old is the only working
+	// Go: put it back instead of deleting it.
+	_, rootErr := env.Sys.Lstat(goRoot)
+	_, oldErr := env.Sys.Stat(filepath.Join(goOld, "VERSION"))
+	if rootErr != nil && oldErr == nil {
+		acts = append(acts, action.Custom{Desc: "put " + goOld + " back as " + goRoot + " (an interrupted run left no " + goRoot + ")", K: action.Files,
+			Fn: func(_ context.Context, s sys.System) error { return s.Rename(goOld, goRoot) }})
+	}
 	for _, d := range []string{goNew, goOld} {
-		if _, err := env.Sys.Lstat(d); err == nil {
+		if _, err := env.Sys.Lstat(d); err == nil && (d != goOld || rootErr == nil || oldErr != nil) {
 			acts = append(acts, action.Custom{Desc: "remove the leftover " + d + " from an interrupted run", K: action.Files,
 				Fn: func(_ context.Context, s sys.System) error { return s.RemoveAll(d) }})
 		}

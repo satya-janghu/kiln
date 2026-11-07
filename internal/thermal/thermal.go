@@ -162,7 +162,8 @@ func AMDReport(s sys.System, f *facts.Facts) (detail string, notes []string) {
 // Fan is the ThinkPad fan sub-part's applicability.
 type Fan struct {
 	ThinkPad bool     // vendor LENOVO with thinkpad_acpi loaded
-	Applies  bool     // and the fan file plus usable sensors exist
+	FanFile  bool     // and /proc/acpi/ibm/fan exists
+	Applies  bool     // and usable sensors exist
 	Sensors  []string // detected hwmon names, in config order
 }
 
@@ -175,6 +176,7 @@ func ThinkPadFan(s sys.System, f *facts.Facts) Fan {
 	if !fan.ThinkPad || !exists(s, FanPath) {
 		return fan
 	}
+	fan.FanFile = true
 	names := map[string]bool{}
 	files, _ := s.Glob(hwmonNameGlob)
 	for _, p := range files {

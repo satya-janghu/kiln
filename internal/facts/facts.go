@@ -76,6 +76,7 @@ type Facts struct {
 	CPU      CPU         `json:"cpu"`
 	RAMBytes uint64      `json:"ram_bytes"`
 	GPUs     []PCIDevice `json:"gpus"`
+	WiFiPCI  []PCIDevice `json:"wifi_pci"` // PCI class 0280, with or without a netdev
 	WiFi     []NIC       `json:"-"`
 
 	EFI        bool   `json:"efi"`

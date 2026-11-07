@@ -104,7 +104,6 @@ kiln changes a live system for 15–40 minutes, and anything can happen in that 
   - sshd listening on its port: up to 15 s. sshd re-execs itself on SIGHUP, so a single check right after `reload` can see a closed port and wrongly trigger a revert.
   - `fail2ban-client ping`: up to 30 s;
   - `docker info`: up to 60 s;
-  - NetworkManager activation, using `nmcli --wait`: up to 90 s;
   - `cockpit.socket` active: up to 15 s.
 
   A deadline that runs out counts as a failed check, which triggers the step's revert or `failed`.
@@ -194,8 +193,8 @@ kiln may run inside GNOME Terminal. Closing that window, logging out, or a displ
 
 SSH changes go through `internal/revert`. You're at the console, so there's no remote session to protect, and the danger is a box that's left half-configured. The pattern is:
 
-1. **Validate offline first:** `sshd -t` and a parsed-back check of NetworkManager profiles.
-2. **Record a `pending` entry in `state.json`,** with the backups (paths under `/var/lib/kiln/backup/`) and how to undo the change.
+1. **Validate offline first:** `sshd -t`.
+2. **Record a `pending` entry in `state.json`,** with snapshots of the files it will touch (tarballs under `/var/lib/kiln/pending/<step>/`) and the commands that undo the change. If the same step's earlier change is still pending, its snapshots are kept.
 3. **Apply the change in place,** using reload where possible.
 4. **Check it locally.** For SSH, `sshd` is listening on the configured port and `sshd -T` shows the expected values.
 5. **If the check passes,** clear `pending`. **If it fails,** restore the backups, restart the previous service, clear `pending`, and record `failed` with what to try.

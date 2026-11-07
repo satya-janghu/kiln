@@ -38,6 +38,9 @@ type Field struct {
 	Choices []ChoiceItem
 	// Validate returns a plain-language error for bad values.
 	Validate func(v any) error
+	// PerRun options apply to this run only: they are never saved in
+	// state.json, so the next run starts from the default again.
+	PerRun bool
 }
 
 // Resolved holds every step's enablement and every option's value.
@@ -190,7 +193,7 @@ func (r *Resolved) NonDefault(defaults *Resolved) map[string]any {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		if r.Fields[k].Kind == Secret {
+		if f := r.Fields[k]; f.Kind == Secret || f.PerRun {
 			continue
 		}
 		if fmt.Sprint(r.Values[k]) != fmt.Sprint(defaults.Values[k]) {

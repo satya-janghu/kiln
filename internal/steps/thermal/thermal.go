@@ -137,7 +137,11 @@ func (Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
 
 	fan := thermal.ThinkPadFan(env.Sys, f)
 	if env.Opts.Bool("thinkfan") && fan.ThinkPad && !fan.Applies {
-		env.Notes.Add("ThinkPad fan control: not applicable: this ThinkPad doesn't expose fan control.")
+		if fan.FanFile {
+			env.Notes.Add("ThinkPad fan control: not applicable: no supported temperature sensor (k10temp or amdgpu) was found.")
+		} else {
+			env.Notes.Add("ThinkPad fan control: not applicable: this ThinkPad doesn't expose fan control.")
+		}
 	}
 	if !fanWanted(env, fan) {
 		return acts, nil

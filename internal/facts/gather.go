@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,7 +27,8 @@ func Gather(ctx context.Context, s sys.System) *Facts {
 	}
 	f.Virt, f.Container = virt(ctx, s)
 	f.Root = os.Geteuid() == 0
-	f.ViaPlainSu = f.Root && !strings.Contains(":"+os.Getenv("PATH")+":", ":/usr/sbin:")
+	// cli.fixRootPath adds the sbin directories and sets KILN_PLAIN_SU.
+	f.ViaPlainSu = f.Root && (os.Getenv("KILN_PLAIN_SU") == "1" || !strings.Contains(":"+os.Getenv("PATH")+":", ":/usr/sbin:"))
 	f.SSHSession = os.Getenv("SSH_CONNECTION") != ""
 	f.User, f.UserProblem = targetUser(s)
 	f.Hostname = trim(read(s, "/etc/hostname"))
@@ -54,6 +56,7 @@ func Gather(ctx context.Context, s sys.System) *Facts {
 	f.CPU = cpu(s)
 	f.RAMBytes = memTotal(s)
 	f.GPUs = pciGPUs(s)
+	f.WiFiPCI = pciWiFi(s)
 
 	if _, err := s.Stat("/sys/firmware/efi"); err == nil {
 		f.EFI = true
@@ -243,7 +246,14 @@ func memTotal(s sys.System) uint64 {
 	return 0
 }
 
-func pciGPUs(s sys.System) []PCIDevice {
+func pciGPUs(s sys.System) []PCIDevice { return pciDevices(s, "0300", "0302", "0380") }
+
+// pciWiFi lists PCI network controllers of class 0280 ("Network controller"
+// subclass 80, used by Wi-Fi cards; pci.ids). They are listed even when their
+// driver couldn't load its firmware and so created no network interface.
+func pciWiFi(s sys.System) []PCIDevice { return pciDevices(s, "0280") }
+
+func pciDevices(s sys.System, classes ...string) []PCIDevice {
 	var out []PCIDevice
 	devs, _ := s.Glob("/sys/bus/pci/devices/*")
 	for _, d := range devs {
@@ -252,7 +262,7 @@ func pciGPUs(s sys.System) []PCIDevice {
 			continue
 		}
 		c := class[:4]
-		if c != "0300" && c != "0302" && c != "0380" {
+		if !slices.Contains(classes, c) {
 			continue
 		}
 		dev := PCIDevice{

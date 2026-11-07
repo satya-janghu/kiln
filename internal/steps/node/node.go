@@ -20,10 +20,10 @@ import (
 )
 
 // helperScript is the fixed (never interpolated) bash script kiln runs as the
-// user, without errexit: nvm must never be sourced under `set -e`. The Node
-// version arrives as a positional argument.
-const helperScript = `# Managed by kiln — edits may be overwritten on the next run.
-# Run as: bash <this file> install|check <node-version>. Never under set -e (nvm breaks).
+// user, without errexit: nvm must never be sourced under `set -e`. It's fed to
+// `bash -s -- install|check <node-version>` on stdin, so no file has to
+// survive between runs (a cleared ~/.cache once made Check report nvm missing).
+const helperScript = `# kiln's nvm helper: bash -s -- install|check <node-version>. Never under set -e (nvm breaks).
 export NVM_DIR="$HOME/.nvm"
 . "$NVM_DIR/nvm.sh"
 case "$1" in
@@ -78,7 +78,7 @@ func (Step) Options(*facts.Facts) []options.Field {
 }
 
 type paths struct {
-	nvmDir, nvmSh, cacheDir, helper, dropIn string
+	nvmDir, nvmSh, cacheDir, dropIn string
 }
 
 func pathsFor(u *sys.User) paths {
@@ -87,7 +87,6 @@ func pathsFor(u *sys.User) paths {
 		nvmDir:   filepath.Join(u.Home, ".nvm"),
 		nvmSh:    filepath.Join(u.Home, ".nvm", "nvm.sh"),
 		cacheDir: cache,
-		helper:   filepath.Join(cache, "kiln-nvm.sh"),
 		dropIn:   filepath.Join(userenv.BashrcD(u), "50-kiln-nvm.sh"),
 	}
 }
@@ -107,10 +106,7 @@ func fileIs(s sys.System, path string, want []byte) bool {
 // state runs the helper's check mode as the user (read-only).
 func state(ctx context.Context, env *step.Env, p paths) map[string]string {
 	out := map[string]string{}
-	if !fileIs(env.Sys, p.helper, []byte(helperScript)) {
-		return out
-	}
-	r, _ := env.Sys.Query(ctx, sys.Cmd{Name: "bash", Args: []string{p.helper, "check", env.Opts.String("node_version")}, As: env.User(), Timeout: 2 * time.Minute})
+	r, _ := env.Sys.Query(ctx, helperCmd(env.User(), "check", env.Opts.String("node_version"), 2*time.Minute))
 	for _, l := range strings.Split(r.Stdout, "\n") {
 		if k, v, ok := strings.Cut(l, "="); ok {
 			out[k] = strings.TrimSpace(v)
@@ -162,7 +158,6 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 	acts = append(acts,
 		action.Run{Desc: "create " + p.nvmDir + " and " + p.cacheDir + " as " + u.Name, K: action.Files,
 			Cmd: sys.Cmd{Name: "mkdir", Args: []string{"-p", p.nvmDir, p.cacheDir}, As: u}},
-		action.WriteFile{Path: p.helper, Content: []byte(helperScript), Mode: 0o644, Owner: u},
 	)
 
 	st := state(ctx, env, p)
@@ -171,12 +166,17 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		acts = append(acts, installNvm(u, p, nvmVer))
 	}
 	acts = append(acts, action.Run{
-		Desc: fmt.Sprintf("as %s: nvm install %s; nvm alias default %s; node -v && npm -v (bash, no errexit)", u.Name, nodeVer, nodeVer),
-		Cmd:  sys.Cmd{Name: "bash", Args: []string{p.helper, "install", nodeVer}, As: u, Timeout: 30 * time.Minute},
+		Desc: fmt.Sprintf("as %s: nvm install %s; nvm alias default %s; node -v && npm -v (kiln's fixed helper on bash's stdin, no errexit)", u.Name, nodeVer, nodeVer),
+		Cmd:  helperCmd(u, "install", nodeVer, 30*time.Minute),
 	})
 	acts = append(acts, userenv.Actions(env.Sys, u)...)
 	acts = append(acts, action.WriteFile{Path: p.dropIn, Content: dropInContent(), Mode: 0o644, Owner: u})
 	return acts, nil
+}
+
+// helperCmd runs helperScript as the user: `bash -s -- <mode> <version>`.
+func helperCmd(u *sys.User, mode, version string, timeout time.Duration) sys.Cmd {
+	return sys.Cmd{Name: "bash", Args: []string{"-s", "--", mode, version}, Stdin: []byte(helperScript), As: u, Timeout: timeout}
 }
 
 // installNvm downloads nvm's pinned install.sh and runs it with bash as the user.

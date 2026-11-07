@@ -4,6 +4,7 @@ package multimedia
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/satya-janghu/kiln/internal/facts"
 	"github.com/satya-janghu/kiln/internal/options"
 	"github.com/satya-janghu/kiln/internal/step"
+	"github.com/satya-janghu/kiln/internal/steps/kernel"
 	"github.com/satya-janghu/kiln/internal/sys"
 )
 
@@ -140,10 +142,15 @@ func backportsOn(env *step.Env) bool {
 	return ok && v
 }
 
-// headersSuite: the same suite as the kernel metapackage (backports only when
-// the backports kernel is selected for this machine).
-func headersSuite(env *step.Env) string {
-	if env.All.IsEnabled("kernel") && backportsOn(env) {
+// headersSuite: the same suite as the installed kernel metapackage (catalog
+// 7), read from the machine, not from the kernel step's checkbox: if that step
+// was ticked but failed, the machine still runs trixie's kernel. The preview
+// (nothing installed yet) predicts from the checkbox.
+func headersSuite(ctx context.Context, env *step.Env) string {
+	if bp, _ := kernel.InstalledFromBackports(ctx, env.Sys); bp {
+		return backportsSuite
+	}
+	if env.Sys.DryRun() && env.All.IsEnabled("kernel") && backportsOn(env) {
 		return backportsSuite
 	}
 	return ""
@@ -175,8 +182,13 @@ func wanted(ctx context.Context, env *step.Env) []string {
 		if env.Facts.HasGPUVendor("1002") {
 			pkgs = append(pkgs, vaAMD...)
 		}
-		if env.Facts.HasGPUVendor("8086") && !apt.Installed(ctx, env.Sys, intelNonFree) && !apt.Installed(ctx, env.Sys, intelMain) {
-			pkgs = append(pkgs, intelVA(ctx, env.Sys))
+		// GNOME's libva2 Recommends pull in main's intel-media-va-driver (via
+		// va-driver-all), so main being installed doesn't mean non-free was
+		// considered. non-free Conflicts with main, so apt swaps it once.
+		if env.Facts.HasGPUVendor("8086") && !apt.Installed(ctx, env.Sys, intelNonFree) {
+			if p := intelVA(ctx, env.Sys); p == intelNonFree || !apt.Installed(ctx, env.Sys, intelMain) {
+				pkgs = append(pkgs, p)
+			}
 		}
 	}
 	return pkgs
@@ -323,7 +335,24 @@ func (s Step) dvdAction(env *step.Env) action.Action {
 		Desc: install.Describe() + ", then " + build.Describe() + "; if that fails, DVD playback is left out and the summary says why",
 		K:    action.Packages,
 		Fn: func(ctx context.Context, sy sys.System) error {
-			err := action.RunAll(ctx, sy, []action.Action{install, build})
+			err := action.RunAll(ctx, sy, []action.Action{install})
+			if err == nil && !sy.DryRun() {
+				// The build runs dpkg itself, outside the apt helper (rule 9):
+				// wait for the automatic apt jobs and the dpkg lock first.
+				// libdvd-pkg's build script exits 0 without building when dpkg
+				// is locked.
+				if err = apt.WaitForAutomatic(ctx, sy); err == nil {
+					err = apt.WaitDpkgUnlocked(ctx, sy)
+				}
+			}
+			if err == nil {
+				err = action.RunAll(ctx, sy, []action.Action{build})
+			}
+			if err == nil && !sy.DryRun() && !dvdDone(ctx, sy) {
+				// It can also exit 0 without building (apt-get check failed, or
+				// a stale *.is-installed marker): count that as a failure too.
+				err = errors.New("libdvd-pkg finished without building libdvdcss2")
+			}
 			if err == nil {
 				return nil
 			}
@@ -396,7 +425,7 @@ func (s Step) planNVIDIA(ctx context.Context, env *step.Env) ([]action.Action, e
 		})
 	}
 	// 2. Kernel headers from the kernel metapackage's suite.
-	hs := headersSuite(env)
+	hs := headersSuite(ctx, env)
 	from := "trixie"
 	if hs != "" {
 		from = hs

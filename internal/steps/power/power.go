@@ -317,6 +317,9 @@ func managerPart(ctx context.Context, env *step.Env) part {
 		if apt.Installed(ctx, s, tuned) {
 			return todo("tuned is installed alongside power-profiles-daemon")
 		}
+		if _, err := s.Lstat(oldTunedProfile); err == nil {
+			return todo("kiln's old kiln-performance profile is still there")
+		}
 		if cur := query(ctx, s, "powerprofilesctl", "get"); cur != "balanced" {
 			return todo("the power profile is %q, not balanced", cur)
 		}
@@ -422,6 +425,9 @@ func managerActions(ctx context.Context, env *step.Env) []action.Action {
 		if !apt.Installed(ctx, s, ppd) {
 			acts = append(acts, action.AptInstall{Pkgs: []string{ppd}})
 		}
+		// Installed but stopped or disabled is repaired too (setPPD then waits).
+		acts = append(acts, action.Systemctl{Verb: "enable", Now: true, Units: []string{"power-profiles-daemon.service"}})
+		acts = append(acts, removeOldProfile())
 		acts = append(acts, action.Custom{
 			Desc: "set the power profile with `powerprofilesctl set balanced` (the choice persists in /var/lib/power-profiles-daemon/state.ini)",
 			K:    action.Services,
@@ -441,16 +447,9 @@ func managerActions(ctx context.Context, env *step.Env) []action.Action {
 			acts = append(acts, action.AptInstall{Pkgs: []string{tuned}})
 		}
 		acts = append(acts,
-			action.Custom{
-				Desc: "remove kiln's old " + oldTunedProfile + " profile if it's there",
-				K:    action.Files,
-				Fn: func(_ context.Context, s sys.System) error {
-					if _, err := s.Lstat(oldTunedProfile); err != nil {
-						return nil
-					}
-					return s.RemoveAll(oldTunedProfile)
-				},
-			},
+			// Installed but stopped or disabled is repaired too.
+			action.Systemctl{Verb: "enable", Now: true, Units: []string{"tuned.service"}},
+			removeOldProfile(),
 			action.Custom{
 				Desc: "wait for tuned to be running, then select trixie's balanced profile (tuned-adm profile " + tunedProfileName + ")",
 				K:    action.Services,
@@ -475,6 +474,21 @@ func managerActions(ctx context.Context, env *step.Env) []action.Action {
 		},
 	})
 	return acts
+}
+
+// removeOldProfile removes the custom tuned profile earlier kiln versions
+// wrote (kiln's own file), whichever power manager is now in use.
+func removeOldProfile() action.Action {
+	return action.Custom{
+		Desc: "remove kiln's old " + oldTunedProfile + " profile if it's there",
+		K:    action.Files,
+		Fn: func(_ context.Context, s sys.System) error {
+			if _, err := s.Lstat(oldTunedProfile); err != nil {
+				return nil
+			}
+			return s.RemoveAll(oldTunedProfile)
+		},
+	}
 }
 
 func waitActive(ctx context.Context, s sys.System, unit string, d time.Duration) error {

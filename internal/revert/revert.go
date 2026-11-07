@@ -27,6 +27,13 @@ func Begin(ctx context.Context, s sys.System, st *state.State, step, desc string
 	if st.Pending != nil && st.Pending.Step != step {
 		return fmt.Errorf("an earlier change (%s) didn't finish and hasn't been reverted; restart kiln and answer its revert question first", st.Pending.Desc)
 	}
+	if st.Pending != nil {
+		// The same step's earlier change was left unfinished (kiln died, or the
+		// owner chose not to revert it). Its snapshots hold the state from
+		// before that change, the last known good one: keep them, never
+		// re-snapshot the half-applied files over them.
+		return nil
+	}
 	dir := filepath.Join(Root, step)
 	_ = s.RemoveAll(dir)
 	if err := s.MkdirAll(dir, 0o700, nil); err != nil {
@@ -34,7 +41,7 @@ func Begin(ctx context.Context, s sys.System, st *state.State, step, desc string
 	}
 	p := &state.Pending{Step: step, Desc: desc, Snapshots: map[string]string{}, Restore: restore, Started: time.Now()}
 	for i, path := range paths {
-		fi, err := s.Lstat(path)
+		_, err := s.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			p.Snapshots[path] = ""
 			continue
@@ -47,7 +54,6 @@ func Begin(ctx context.Context, s sys.System, st *state.State, step, desc string
 		if _, err := s.Run(ctx, sys.Cmd{Name: "tar", Args: []string{"-C", "/", "--xattrs", "-cpf", snap, rel}}); err != nil {
 			return fmt.Errorf("could not snapshot %s before changing it: %w", path, err)
 		}
-		_ = fi
 		p.Snapshots[path] = snap
 	}
 	st.Pending = p

@@ -235,13 +235,21 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 			Desc: "convert third-party .list files to deb822 with `apt -y modernize-sources`, then make sure every converted file has a Signed-By key",
 			K:    action.Packages,
 			Fn: func(ctx context.Context, s sys.System) error {
+				// Only modernize's output is checked (catalog 2: "any output
+				// file"): it writes X.sources for each X.list it converts
+				// (apt 3.0.3 apt-private/private-sources.cc). A third-party
+				// .sources that was already there is left as it is.
+				var converted []string
+				for _, f := range listFiles(s, ".list") {
+					converted = append(converted, strings.TrimSuffix(f, ".list")+".sources")
+				}
 				if _, err := s.Run(ctx, sys.Cmd{Name: "apt", Args: []string{"-y", "modernize-sources"}, Env: apt.Env()}); err != nil {
 					return err
 				}
 				if s.DryRun() {
 					return nil
 				}
-				for _, f := range listFiles(s, ".sources") {
+				for _, f := range converted {
 					b, _ := s.ReadFile(f)
 					for _, st := range apt.ParseDeb822(string(b)) {
 						if st.Enabled() && strings.TrimSpace(st.Get("Signed-By")) == "" && f != DebianSources {

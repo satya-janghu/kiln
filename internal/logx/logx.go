@@ -61,6 +61,11 @@ func (h handler) WithAttrs(as []slog.Attr) slog.Handler {
 }
 func (h handler) WithGroup(n string) slog.Handler { return handler{h.inner.WithGroup(n), h.red} }
 
+// Level is the lowest level Open's loggers write. The wizard logs every query
+// (debug); the boot/power-event/timer helpers set Info so the log doesn't grow
+// by every read they make dozens of times a day.
+var Level = slog.LevelDebug
+
 // Open returns a logger writing to path (or io.Discard if it can't be opened).
 func Open(path string, red *Redactor) (*slog.Logger, io.Closer) {
 	var w io.Writer = io.Discard //nolint:staticcheck // assigned a *os.File below
@@ -71,6 +76,6 @@ func Open(path string, red *Redactor) (*slog.Logger, io.Closer) {
 			w, c = f, f
 		}
 	}
-	h := slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})
+	h := slog.NewTextHandler(w, &slog.HandlerOptions{Level: Level})
 	return slog.New(handler{h, red}), c
 }

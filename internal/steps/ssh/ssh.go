@@ -482,16 +482,13 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 	if err := verify(ctx, env.Sys, env, pa, socket); err != nil {
 		return step.Todo("%s", err.Error()), nil
 	}
+	standingNotes(env, len(have))
 	return step.Done(fmt.Sprintf("root login %s, password logins %s, port %d, %d keys", map[string]string{"yes": "on", "no": "off"}[rootLogin(env)], map[string]string{"yes": "on", "no": "off"}[pa], Port(env), len(have))), nil
 }
 
-func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
-	akPath := authorizedKeys(env)
-	_, have := installed(env.Sys, akPath)
-	predicted := len(have)
-	socket := SocketMode(ctx, env.Sys)
-	port := Port(env)
-
+// standingNotes are shown on every run, also when nothing changes (catalog
+// 15: "the review screen and summary warn" while passwords are on).
+func standingNotes(env *step.Env, keys int) {
 	if passwordAuth(env) == "yes" {
 		who := env.User().Name
 		if rootLogin(env) == "yes" {
@@ -501,21 +498,37 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		msg += ", from anywhere SSH is reachable (D45). fail2ban slows down guessing, but a guessed password gives root access. Use strong passwords, or turn password logins off in the SSH options."
 		env.Notes.Warn("%s", msg)
 		env.Notes.Add("%s", msg)
-	} else if predicted == 0 {
-		env.Notes.Warn("SSH password logins will be off, but no SSH key is installed for %s, so nobody can log in to this machine over SSH. Add your key to %s yourself first, or set password logins to On.", env.User().Name, akPath)
+	} else if keys == 0 {
+		env.Notes.Warn("SSH password logins are off, but no SSH key is installed for %s, so nobody can log in to this machine over SSH. Add your key to %s yourself first, or set password logins to On.", env.User().Name, authorizedKeys(env))
 	}
+	env.Notes.Add("SSH allows %d authentication attempts per connection (MaxAuthTries). If an agent offers more keys than that, set `IdentitiesOnly yes` and `IdentityFile` for this host in the client's ~/.ssh/config.", env.Opts.Int("max_auth_tries"))
+	env.Notes.Add("To reach SSH from the internet, forward port %d on your router to this machine yourself; kiln doesn't change the router.", Port(env))
+}
+
+func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
+	akPath := authorizedKeys(env)
+	_, have := installed(env.Sys, akPath)
+	predicted := len(have)
+	socket := SocketMode(ctx, env.Sys)
+	port := Port(env)
+
+	standingNotes(env, predicted)
 	if !slices.Contains(CurrentPorts(ctx, env.Sys), port) {
 		if who, taken := portTaken(ctx, env.Sys, port); taken {
 			env.Notes.Warn("Port %d is already in use (%s), so sshd can't listen there and the SSH step will fail. Choose another port in the SSH options.", port, who)
 		}
 	}
 	for f, ps := range portLines(env.Sys) {
-		if port != 22 && !socket {
+		switch {
+		case socket:
+		case port != 22:
 			env.Notes.Warn("%s has Port %v; Port lines add up, so sshd will also listen there. kiln leaves that file alone.", f, ps)
+		default:
+			// kiln writes no Port line for 22, so sshd listens only on the
+			// ports in that file, and the listen check on 22 fails.
+			env.Notes.Warn("%s has Port %v, so sshd doesn't listen on port 22 and the SSH step will fail its check. Set the SSH port option to %d, or remove that Port line.", f, ps, ps[0])
 		}
 	}
-	env.Notes.Add("SSH allows %d authentication attempts per connection (MaxAuthTries). If an agent offers more keys than that, set `IdentitiesOnly yes` and `IdentityFile` for this host in the client's ~/.ssh/config.", env.Opts.Int("max_auth_tries"))
-	env.Notes.Add("To reach SSH from the internet, forward port %d on your router to this machine yourself; kiln doesn't change the router.", port)
 
 	var acts []action.Action
 	if !apt.Installed(ctx, env.Sys, "openssh-server") {
@@ -590,7 +603,11 @@ func applyConfig(ctx context.Context, s sys.System, env *step.Env, pa string, so
 	}
 	undo := func(cause error) error {
 		if uerr := revert.Undo(ctx, s, env.State); uerr != nil {
-			return fmt.Errorf("%w; putting the previous SSH settings back also failed: %w. Restore %s from %s and run `systemctl reload-or-restart ssh`", cause, uerr, DropIn, sys.BackupPath(DropIn))
+			fix := "systemctl reload-or-restart ssh"
+			if socket {
+				fix = "systemctl daemon-reload && systemctl restart ssh.socket"
+			}
+			return fmt.Errorf("%w; putting the previous SSH settings back also failed: %w. Restore the files from the snapshot named above, then run `%s`", cause, uerr, fix)
 		}
 		return fmt.Errorf("%w. The previous SSH settings were put back", cause)
 	}
@@ -617,7 +634,9 @@ func applyConfig(ctx context.Context, s sys.System, env *step.Env, pa string, so
 	if socket {
 		applyCmds = [][]string{{"systemctl", "daemon-reload"}, {"systemctl", "restart", "ssh.socket"}}
 	} else {
-		applyCmds = [][]string{{"systemctl", "reload", "ssh"}}
+		// reload-or-restart: a plain reload fails when ssh.service is enabled
+		// but not running; this starts it instead.
+		applyCmds = [][]string{{"systemctl", "reload-or-restart", "ssh"}}
 	}
 	for _, c := range applyCmds {
 		if _, err := s.Run(ctx, sys.Cmd{Name: c[0], Args: c[1:]}); err != nil {

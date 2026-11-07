@@ -6,7 +6,7 @@ Steps run in the order listed. Every step and sub-option defaults to **on** in t
 
 **The Debian installer owns the desktop (GNOME or none), the SSH server and blends.** kiln never installs or removes them. It detects them in `preflight`, and steps that depend on them are "not applicable" when they're absent. Verified against tasksel 3.81 and blendsel 0.10:
 - **"GNOME detected"** means `gnome-shell` and `gdm3` are installed. `task-gnome-desktop` → `gnome-core` pulls in both.
-- **"SSH server detected"** means `openssh-server` is installed. `task-ssh-server` depends on it. Exception (D45): the ssh step installs and enables the SSH server when it's missing, and the firewall and fail2ban treat SSH as present whenever that step is ticked.
+- **"SSH server detected"** means `openssh-server` is installed. `task-ssh-server` depends on it. Exception (D45): the ssh step installs and enables the SSH server when it's missing, and fail2ban treats SSH as present whenever that step is ticked.
 - **"Standard system utilities"** is not a package: it's every Priority: standard package.
 - **Blends** are the `task-*-blend` packages (astro, med, junior-desktop, science, freedombox, hamradio). Debian Edu isn't offered by the installer.
 
@@ -37,7 +37,7 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
   1. the `pending` revert prompt;
   2. a run record left unfinished → "The last run stopped during <step>";
   3. interrupted dpkg (`dpkg --audit` output, or `/var/lib/dpkg/updates/` entries) → `dpkg --configure -a` + `apt-get -f install -y`;
-  4. stale runtime masks and leftover `.kiln-new`/`.kiln-old` directories are cleaned up.
+  4. stale runtime masks are cleaned up. (A leftover `/usr/local/go.kiln-new`/`.kiln-old` from an interrupted Go swap is handled by the go step, step 23.)
 - **Power.** On battery, warn. Below 30% and not on AC, ask for confirmation before continuing.
 - **Internet.** HTTPS HEAD to `deb.debian.org` and `github.com` (5 s timeout each), plus a DNS check. Report the failure precisely:
   - DNS failure → "check the network / DNS";
@@ -194,7 +194,9 @@ All of this runs under a `revert` snapshot of `sources.list` and `sources.list.d
   - `firmware-intel-graphics` and `firmware-intel-misc` for Intel graphics;
   - `firmware-nvidia-graphics` for an NVIDIA GPU (nouveau firmware; the proprietary driver's `firmware-nvidia-gsp` comes in via `nvidia-kernel-dkms` in multimedia);
   - `firmware-realtek` for any Realtek NIC, Wi-Fi or Bluetooth device.
-- Wi-Fi, by driver: Intel `iwlwifi` → `firmware-iwlwifi`; Qualcomm Atheros `ath*` → `firmware-atheros`; MediaTek `mt7*` → `firmware-mediatek`; Broadcom `brcmfmac` → `firmware-brcm80211`.
+- Wi-Fi, by driver: Intel `iwlwifi` → `firmware-iwlwifi`; Qualcomm Atheros `ath*` → `firmware-atheros`; MediaTek `mt7*` → `firmware-mediatek`; Broadcom `brcmfmac` → `firmware-brcm80211`. Realtek drivers match as `r8169`, `r8152`, `rtw_*` (rtw88 registers as `rtw_<chip>`), `rtw89*` and `rtl8*`.
+- Wi-Fi cards on PCI (class `0280`) are also matched by vendor, because a card whose firmware is missing never gets a network interface: Intel `8086` → `firmware-iwlwifi`, MediaTek `14c3` → `firmware-mediatek`, Realtek `10ec` → `firmware-realtek`, Qualcomm `168c`/`17cb` → `firmware-atheros`, Broadcom `14e4` → `firmware-brcm80211` (pci.ids).
+- If `update-initramfs -u -k all` fails, the error says to free space in `/boot` and run it again.
 - After installing, run `update-initramfs -u -k all`. The firmware triggers rebuild only the newest image's initramfs, so the stable fallback kernel would otherwise boot without the new firmware.
 - Then report anything still missing using `isenkram-autoinstall-firmware -l` (from `isenkram-cli`, **list-only**). kiln never runs isenkram in install mode, because it writes one-line `.list` sources that clash with kiln's deb822 and mirror setup. Missing firmware becomes a summary note.
 
@@ -226,7 +228,7 @@ Reboot note if microcode changed.
 
 After that, the backports metapackage brings each newer backports kernel. The `autoupdates` step upgrades packages from every repository (D40), so those kernel updates also arrive automatically.
 
-**Check:** a backports `linux-image-amd64` is installed.
+**Check:** a backports `linux-image-amd64` is installed, and so is everything else this step installs from backports when backports offers it: `linux-headers-amd64` (with an NVIDIA GPU) and the selected firmware (with the backports-firmware option). A part that failed, or an option turned on later, is retried.
 
 **Gotchas:**
 - Once the metapackage comes from backports, nothing depends on the stable 6.12 image any more. Debian's normal autoremove will eventually remove it once newer kernels arrive, which this policy accepts. To switch back to stable, install `linux-image-amd64` from trixie by hand.
@@ -260,7 +262,7 @@ After that, the backports metapackage brings each newer backports kernel. The `a
   - **Debian stock.** "Debian stock" uses trixie's `nvidia-driver` 550.163 (non-free). It supports Maxwell, Pascal, Volta, Turing, Ampere and Ada/Hopper, but not Blackwell. Debian's wiki says the 550 series "is no longer maintained and contains several security issues"; the option form shows that sentence.
   - **GPU generation.** For pre-Turing GPUs (e.g. your GTX 970, Maxwell), "Debian stock" is the only choice; "NVIDIA latest" is shown disabled with the reason. For Blackwell, only "NVIDIA latest" is offered. kiln decides the generation from the GPU's PCI device ID, matched against the compatible-GPU table in NVIDIA's open-gpu-kernel-modules README at the matching release tag. That table is compiled into kiln and refreshed with each kiln release.
   - **Unticking.** Unticking the NVIDIA option leaves Debian's open `nouveau` driver in place, using `firmware-nvidia-graphics` from step 5.
-  1. **Secure Boot on** (`mokutil --sb-state`), for **both** sources: prepare signing **before** installing the driver. Both build the module with DKMS; NVIDIA's `nvidia-kernel-open-dkms` needs `dkms ≥ 3.1.8`, and trixie has 3.2.2.
+  1. **Secure Boot on** (the efivar from preflight's facts), for **both** sources: prepare signing **before** installing the driver. Both build the module with DKMS; NVIDIA's `nvidia-kernel-open-dkms` needs `dkms ≥ 3.1.8`, and trixie has 3.2.2.
      - Install `mokutil openssl dkms`, then `dkms generate_mok`. This creates `/var/lib/dkms/mok.key` and `mok.pub` (DER, RSA-2048) if missing, and dkms signs modules with them.
      - Check enrollment: if `mokutil --test-key /var/lib/dkms/mok.pub` says the key isn't enrolled or pending (in mokutil 0.7.2 it also checks MokNew):
        - generate a one-time password, stored in `/etc/kiln/secrets/mok` (0600) and shown once on the summary screen, never in notes;
@@ -290,8 +292,8 @@ After that, the backports metapackage brings each newer backports kernel. The `a
 **Check:**
 - the selected packages are installed;
 - `libdvdcss2` is installed (version `*~local`) and `/usr/lib/x86_64-linux-gnu/libdvdcss.so.2` exists;
-- with NVIDIA: the chosen source is in effect. For "NVIDIA latest": `nvidia-cuda.sources` and the key match, and `apt-cache policy nvidia-driver` shows the installed version from origin NVIDIA. For "Debian stock": the installed version is from trixie. In both cases `dkms status` shows the module built for the running kernel;
-- with NVIDIA and Secure Boot, the MOK is enrolled or pending (`--test-key` or `--list-new`).
+- with NVIDIA: the chosen source is in effect. For "NVIDIA latest": `nvidia-cuda.sources` and the key match, and `apt-cache policy nvidia-driver` shows the installed version from origin NVIDIA. For "Debian stock": the installed version is from trixie. In both cases `dkms status` shows the module built for the running kernel, or for a **newer** installed kernel waiting for a reboot (`dpkg --compare-versions`); an older kernel with the module doesn't count;
+- with NVIDIA and Secure Boot, the MOK is enrolled or pending (`mokutil --test-key`, which also covers the pending request in mokutil 0.7.2).
 
 ---
 
@@ -533,17 +535,17 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 3. **Keys:** kiln doesn't add SSH keys (D50). It counts the valid keys already in `<home>/.ssh/authorized_keys`, so it can warn when password logins are off and no key exists.
 4. **Drop-in** `/etc/ssh/sshd_config.d/10-kiln.conf`:
    - `PermitRootLogin yes` (option "Allow root to log in over SSH", on by default, D45), `MaxAuthTries 4` (the owner's choice), `X11Forwarding no`.
-   - `PasswordAuthentication yes` by default (option "Password logins": `on`, D45). The other value is `off` (D51); with `off` and no key in `authorized_keys`, the review screen warns that nobody could log in over SSH. When passwords are on, the review screen and summary warn that password logins for the user and root are open to anywhere SSH is reachable, with fail2ban slowing down guessing.
+   - `PasswordAuthentication yes` by default (option "Password logins": `on`, D45). The other value is `off` (D51); with `off` and no key in `authorized_keys`, the review screen warns that nobody could log in over SSH. When passwords are on, the review screen and summary warn on every run, also when nothing changes, that password logins for the user and root are open to anywhere SSH is reachable, with fail2ban slowing down guessing.
    - `KbdInteractiveAuthentication no` is left out, because Debian already sets it.
-5. **Port** (when it isn't 22): `Port <n>` in the drop-in. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`.
+5. **Port** (when it isn't 22): `Port <n>` in the drop-in. With port 22 kiln writes no `Port` line, so if another file sets one, sshd doesn't listen on 22 at all: the review screen warns that the step will fail its check and names the port to choose instead. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`.
 6. **Verify, then revert on failure:**
    1. Record `pending` and validate with `sshd -t`.
-   2. Apply with `systemctl reload ssh`.
+   2. Apply with `systemctl reload-or-restart ssh`: a reload when sshd is running, a start when `ssh.service` is enabled but stopped.
    3. Check:
       - `ssh` is active;
       - something is listening on the port (`ss -ltn`);
       - `sshd -T -C user=<target>,host=<hostname>,addr=<lan-ip>` shows the expected values. Without `-C`, `-T` ignores `Match` blocks, so a `Match User` block that re-enables passwords would go unseen.
-   4. If anything fails, restore the previous drop-in, reload, and record `failed`.
+   4. If anything fails, restore the previous drop-in, `systemctl reload-or-restart ssh` (socket mode: `daemon-reload` + `restart ssh.socket`), and record `failed`. If an earlier SSH change was left unfinished, its first snapshot is kept, so the revert goes back to the last known good files.
 
 **Check:** `openssh-server` is installed and `ssh.service` enabled, root has a password (when the option is on and the user has one), the drop-in matches, the `sshd -T -C …` values match, and the port is listening.
 
@@ -617,7 +619,7 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
 **ID** `cockpit` · apps · depends: apt-sources
 
 **Actions:**
-- Install `cockpit`. With backports on, use `apt-get install -t trixie-backports cockpit` (371). The `(>= source:Version)` dependencies pull the matching 371 binaries from backports. Without backports, install from main (337).
+- Install `cockpit` and `cockpit-networkmanager` (named, because apt adds no Recommends to a package that's already installed). With backports on, use `apt-get install -t trixie-backports cockpit` (371). The `(>= source:Version)` dependencies pull the matching 371 binaries from backports. Without backports, install from main (337).
 - **Keep Recommends**. In both versions they're `cockpit-storaged`, `cockpit-networkmanager` and `cockpit-packagekit`, and `cockpit-networkmanager` is the networking page.
 - `cockpit-machines` and `cockpit-podman` are not recommended, and kiln never installs them.
 - The Recommends pull in `network-manager`, `packagekit` and `udisks2`. The review screen lists them. NetworkManager then runs but leaves the installer's ifupdown interfaces alone (D52).
@@ -700,7 +702,7 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
    - `PROFILE=/dev/null` stops it editing shell files, because kiln's drop-in sources nvm instead;
    - an explicit `NVM_DIR` that doesn't exist makes install.sh exit 1, hence step 1;
    - `METHOD=script` makes the download method deterministic (curl or wget) instead of depending on whether git is installed.
-3. As the user, run one `bash` invocation **without errexit**, from a fixed script file (not interpolated): `. "$NVM_DIR/nvm.sh"; nvm install 26; nvm alias default 26; node -v && npm -v`.
+3. As the user, run one `bash -s` invocation **without errexit**, with a fixed script (not interpolated) on its stdin, so nothing has to survive in `~/.cache` between runs: `. "$NVM_DIR/nvm.sh"; nvm install 26; nvm alias default 26; node -v && npm -v`.
 4. Write `<home>/.bashrc.d/50-kiln-nvm.sh`: `export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; [ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"`.
 
 **Check:** `<home>/.nvm/nvm.sh` exists, `nvm version default` resolves to v26.x, and `node -v` reports v26 (all run through the same no-errexit bash form).
@@ -775,7 +777,7 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
 1. Install `fwupd fwupd-amd64-signed udisks2`. The signed EFI binary is needed under Secure Boot. The LVFS remote is enabled by default on Debian.
 2. `fwupdmgr refresh --force`.
    - Exit 0 is OK.
-   - Exit 101 means the network is unreachable: the step is skipped with a note.
+   - Exit 101 means the network is unreachable: the step counts as done, with a note that LVFS couldn't be reached.
    - Without `--force`, recent metadata returns 2.
 3. `fwupdmgr get-updates --json`. Exit 0 means updates are available. Exit 2 means nothing to do: stop here, `done`.
 4. `fwupdmgr update -y --no-reboot-check --no-device-prompt`.
@@ -783,7 +785,7 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
    - Anything else becomes a note, not a failure (for example "on battery", or a device that refuses).
 5. If `fwupdmgr check-reboot-needed --json` exits 0, add the reboot reason "firmware update staged".
 
-**Check:** fwupd is installed, and either the last run's update returned 0 or 2, or a reboot is pending. `get-updates` is deliberately not the check, because a device whose update can never apply would otherwise keep the step "not done" forever.
+**Check:** fwupd is installed, and either this run's update returned 0 or 2, or a reboot is pending. So every kiln run checks LVFS again and reports done, by design (D51). `get-updates` is deliberately not the check, because a device whose update can never apply would otherwise keep the step "not done" forever.
 
 ---
 

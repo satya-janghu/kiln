@@ -380,15 +380,21 @@ func applyThresholds(ctx context.Context, s sys.System, f *facts.Facts, bats []t
 		if !ok {
 			continue
 		}
+		// Record only the batteries that took the limit: a battery recorded
+		// but never set would fail Verify on every run and send every
+		// helper run back through the whole ladder.
+		took := []thrBat{primary}
 		for _, other := range bats[1:] {
 			if !ensureCustomType(ctx, s, other, logf) {
 				continue
 			}
-			if _, ore, ook := setPair(ctx, s, other, rs, re, logf); !ook {
+			if _, ore, ook := setPair(ctx, s, other, rs, re, logf); !ook || ore != re {
 				logf("%s: couldn't apply the same limit (reads back %d)", other.Name, ore)
+				continue
 			}
+			took = append(took, other)
 		}
-		return thresholdRecord(bats, rs, re, o, q != nil && q.Cached), true
+		return thresholdRecord(took, rs, re, o, q != nil && q.Cached), true
 	}
 	return state.Battery{}, false
 }
@@ -560,6 +566,11 @@ func reapplyThresholds(ctx context.Context, s sys.System, f *facts.Facts, rec *s
 	bats := recordedBatteries(s, f, rec)
 	if len(bats) == 0 {
 		return false
+	}
+	// The helpers run at every boot, power event and every 15 minutes: write
+	// only when the firmware has actually reset something.
+	if ok, _ := verifyThresholds(s, rec); ok {
+		return true
 	}
 	ok := true
 	for _, b := range bats {

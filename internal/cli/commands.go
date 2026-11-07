@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 	"sort"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/satya-janghu/kiln/internal/app"
 	"github.com/satya-janghu/kiln/internal/battery"
+	"github.com/satya-janghu/kiln/internal/logx"
 	"github.com/satya-janghu/kiln/internal/mirrors"
 	"github.com/satya-janghu/kiln/internal/options"
 	"github.com/satya-janghu/kiln/internal/runner"
@@ -193,6 +195,7 @@ func helperApp(cmd *cobra.Command, info BuildInfo, lock string) (*app.App, func(
 	if err != nil {
 		return nil, nil, err
 	}
+	logx.Level = slog.LevelInfo // helpers run many times a day (boot, power events, timer)
 	a, err := app.Load(cmd.Context(), info.Version, true)
 	if err != nil {
 		release()
@@ -282,9 +285,11 @@ func newMirrorsCmd(info BuildInfo) *cobra.Command {
 			}
 			defer a.Close()
 			if apply {
-				if ok, why := a.Gate(true); !ok {
-					return errors.New(why)
+				release, err := mirrorsGate(a)
+				if err != nil {
+					return err
 				}
+				defer release()
 			}
 			v := a.Opts.For("mirrors")
 			return mirrors.Bench(cmd.Context(), a.Real, a.Facts, mirrors.BenchOpts{
@@ -304,13 +309,32 @@ func newMirrorsCmd(info BuildInfo) *cobra.Command {
 				return err
 			}
 			defer a.Close()
-			if ok, why := a.Gate(true); !ok {
-				return errors.New(why)
+			release, err := mirrorsGate(a)
+			if err != nil {
+				return err
 			}
+			defer release()
 			return mirrors.Reset(cmd.Context(), a.Real)
 		},
 	})
 	return cmd
+}
+
+// mirrorsGate is the apply gate (rule 1: /etc/kiln/allow-apply) plus the
+// wizard's single-instance lock, so these never rewrite apt's sources while a
+// kiln run is using apt.
+func mirrorsGate(a *app.App) (func(), error) {
+	if ok, why := a.Gate(false); !ok {
+		return nil, errors.New(why)
+	}
+	release, pid, err := a.LockRun()
+	if errors.Is(err, runner.ErrBusy) {
+		return nil, fmt.Errorf("kiln is already running (pid %d); try again when it has finished", pid)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return release, nil
 }
 
 func newSecretsCmd(info BuildInfo) *cobra.Command {

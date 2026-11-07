@@ -257,7 +257,9 @@ func driverPolicy(ctx context.Context, s sys.System) policy {
 }
 
 // dkmsBuilt reports whether an nvidia DKMS module is installed for the running
-// kernel, or for a newer installed kernel that's waiting for a reboot.
+// kernel, or for a newer installed kernel that's waiting for a reboot. An
+// older kernel with the module doesn't count: that's the case where DKMS
+// failed for the kernel now running.
 func dkmsBuilt(ctx context.Context, s sys.System, running string) (ok, pendingReboot bool) {
 	r, err := s.Query(ctx, sys.Cmd{Name: "dkms", Args: []string{"status"}, Env: []string{"LC_ALL=C"}})
 	if err != nil {
@@ -275,7 +277,10 @@ func dkmsBuilt(ctx context.Context, s sys.System, running string) (ok, pendingRe
 		if k == running {
 			return true, false
 		}
-		if _, err := s.Stat("/boot/vmlinuz-" + k); err == nil {
+		if _, err := s.Stat("/boot/vmlinuz-" + k); err != nil {
+			continue
+		}
+		if _, err := s.Query(ctx, sys.Cmd{Name: "dpkg", Args: []string{"--compare-versions", k, "gt", running}}); err == nil {
 			pendingReboot = true
 		}
 	}

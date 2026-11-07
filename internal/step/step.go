@@ -132,7 +132,13 @@ func (n *Notes) Add(format string, a ...any) {
 func (n *Notes) Warn(format string, a ...any) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.warnings = append(n.warnings, fmt.Sprintf(format, a...))
+	msg := fmt.Sprintf(format, a...)
+	for _, x := range n.warnings {
+		if x == msg {
+			return
+		}
+	}
+	n.warnings = append(n.warnings, msg)
 }
 
 // Reboot records why a reboot is needed.

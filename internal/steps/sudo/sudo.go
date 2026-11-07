@@ -105,6 +105,14 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 	if env.Opts.Bool("nopasswd") {
 		return step.Done(u + " can use sudo without a password"), nil
 	}
+	// D44 leaves an earlier run's NOPASSWD file in place. sudoers.d is read in
+	// lexical order and the last matching rule wins, so it still applies.
+	if old := fileFor(u); old != "" {
+		if _, err := env.Sys.Stat(old); err == nil {
+			env.Notes.Add("Passwordless sudo is off in the options, but %s from an earlier run is still there and still applies, so %s can use sudo without a password. Remove it with `sudo rm %s` if you want sudo to ask for the password.", old, u, old)
+			return step.Done(u + " can use sudo without a password (an earlier passwordless rule is still in place)"), nil
+		}
+	}
 	return step.Done(u + " can use sudo (with a password)"), nil
 }
 

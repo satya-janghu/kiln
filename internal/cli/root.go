@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -20,7 +21,24 @@ type BuildInfo struct {
 
 // Execute runs kiln with the process arguments and returns the exit code.
 func Execute(info BuildInfo) int {
+	fixRootPath()
 	return run(info, os.Args[1:], os.Stdout, os.Stderr)
+}
+
+// fixRootPath: plain `su` (not `su -`) keeps the user's PATH, which on Debian
+// has no sbin directories, so sshd, visudo, chpasswd and adduser wouldn't be
+// found. Add them before anything runs (facts, the scope re-exec, steps), and
+// leave a marker so facts.ViaPlainSu still reports it after the re-exec.
+func fixRootPath() {
+	if os.Geteuid() != 0 {
+		return
+	}
+	path := os.Getenv("PATH")
+	if strings.Contains(":"+path+":", ":/usr/sbin:") {
+		return
+	}
+	_ = os.Setenv("KILN_PLAIN_SU", "1")
+	_ = os.Setenv("PATH", "/usr/local/sbin:/usr/sbin:/sbin:"+path)
 }
 
 func run(info BuildInfo, args []string, stdout, stderr io.Writer) int {
