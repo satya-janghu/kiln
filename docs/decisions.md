@@ -405,14 +405,14 @@ Details I filled in, flagged for your review:
 - **multimedia depends only on apt-sources.** The kernel step is opt-in and off by default, so a hard dependency would skip multimedia everywhere. NVIDIA headers come from backports only when the kernel step is ticked.
 
 **Network and security:**
-- **firewall:** the `nftables` backend is shown but disabled ("its ruleset isn't specified yet").
-- **firewall:** the plan also sets the default zone to `public` and adds `ssh` to it if missing, which Check requires.
-- **firewall:** extra ports open only in `public`.
-- **firewall:** ports removed from the option aren't closed again.
-- **firewall:** `rdp` opens whenever GNOME is detected.
-- **ssh:** a hard dependency on the firewall step.
+- **firewall:** the `nftables` backend is shown but disabled ("its ruleset isn't specified yet"). *Moot: step removed (D50).*
+- **firewall:** the plan also sets the default zone to `public` and adds `ssh` to it if missing, which Check requires. *Moot: step removed (D50).*
+- **firewall:** extra ports open only in `public`. *Moot: step removed (D50).*
+- **firewall:** ports removed from the option aren't closed again. *Moot: step removed (D50).*
+- **firewall:** `rdp` opens whenever GNOME is detected. *Moot: step removed (D50).*
+- **ssh:** a hard dependency on the firewall step. *Moot (D50).*
 - **ssh:** `password_logins` has the values auto/off/on, and **on** wasn't in the brief.
-- **ssh:** a GitHub 404 fails at plan time, not in the form.
+- **ssh:** a GitHub 404 fails at plan time, not in the form. *Moot (D50).*
 - **network-migration:** the post-switch check polls for 60 s (architecture's deadline; the catalog said 30 s). `pending` is recorded before the keyfile is written.
 - **network-migration:** `inet manual` stanzas, other methods, and VLAN/alias names are left as exceptions, not migrated.
 - **mirrors:**
@@ -429,7 +429,7 @@ Details I filled in, flagged for your review:
   - method "none" counts as done until an interface appears;
   - the watch timer runs every 15 min.
 - **system:** zram installs `systemd-zram-generator` if it's missing.
-- **power:** when ppd doesn't offer `performance`, kiln sets `balanced` explicitly. TLP is stopped, not disabled. A missing greeter power section is appended.
+- **power:** when ppd doesn't offer `performance`, kiln sets `balanced` explicitly. ~~TLP is stopped, not disabled.~~ (TLP handling removed, D50.) A missing greeter power section is appended.
 - **thermal:** the first detected sensor is required and later ones are optional. HP is matched by DMI vendor.
 - **firmware-packages:** Realtek is matched by PCI vendor 10ec or the r8169/r8152/rtw88/rtw89 drivers. isenkram is installed only with the non-free firmware option.
 - **firmware-updates:** runs fwupdmgr on every kiln run, because state has no field for its last result. A refused update becomes a note.
@@ -441,7 +441,7 @@ Details I filled in, flagged for your review:
   - `dkms` is installed before `dkms generate_mok`.
   - The one-time password goes to `mokutil --generate-hash` on stdin, and `--list-new` is dropped (`--test-key` covers MokNew).
   - The one-time password is shown once on the summary screen and stored in `/etc/kiln/secrets/mok`, never in a note (no secrets in the world-readable summary).
-- **remote-desktop:** with the password left empty, kiln reuses the stored password and generates one only if none exists, so a re-run doesn't change it. Generated passwords are 20 characters.
+- **remote-desktop:** with the password left empty, kiln reuses the stored password and generates one only if none exists, so a re-run doesn't change it. Generated passwords are 20 characters. *Moot: step removed (D50).*
 - **Intel VA-API:** without a verified Gen8 ID table, the driver is installed for any Intel GPU, with a pre-Gen8 note. `vainfo` is installed only for AMD, as the catalog literally says.
 - **cockpit:** with backports off, an already-installed backports cockpit is accepted and noted, not downgraded.
 - **docker:** the signing key download has no sha256 (the catalog gives none; apt verifies packages with it).
@@ -552,6 +552,23 @@ Field observations so far are in debian13-notes.md, "Field observations".
 - **The race:** NetworkManager's wpa_supplicant released wlo1 asynchronously after `managed no`. ifupdown's wpa_supplicant started first, found the control socket still in use and refused to start. The undo now waits, for up to 30 s, until `/run/wpa_supplicant/<iface>` is gone.
 - **The missed failure:** `ifup@.service` is `Type=simple`, so `systemctl restart` returned before `ifup` had finished, and kiln reported a good undo. kiln now polls the unit until it is `active/exited` or `failed`, for up to 6 min, and reports a failure with the `journalctl` command to run.
 - **How it's recorded:** a restore step can be a Go function a step registers (`revert.Register`, recorded as `kiln: <name> <args>`), so a revert at the next start waits the same way. `revert.Poll` stops early on `revert.Final` errors.
+
+### D50 · 2026-11-07 · Firewall and remote desktop dropped; no SSH key options; no TLP handling; Wi-Fi power saving left alone
+
+**Status: decided** (your answers on 2026-11-07).
+
+- **Firewall step removed.** A fresh Debian install has no active firewall, and kiln leaves it that way. Your original brief (step 14) had asked for firewalld; you've now decided against it.
+  - fail2ban keeps banning, through nftables: trixie's `defaults-debian.conf` already sets `banaction_allports = nftables[type=allports]`, and nftables is on every install. Its `ignoreip` uses the auto-detected LAN subnets (the firewall's LAN override option is gone).
+  - Cockpit now listens on port 9090 on every network the machine is on.
+  - SSH needs no port opening. The ssh, docker and cockpit steps no longer depend on a firewall step.
+  - The review screen loses its Firewall tab and rule count.
+  - Machines where an earlier kiln run installed firewalld keep it; kiln doesn't remove it.
+- **Remote-desktop step removed** (your brief's step 19). The only stored secret left is the Secure Boot one-time password.
+- **SSH key options removed** (`ssh.github_user`, `ssh.extra_keys`): kiln no longer adds keys. Keys you add to `~/.ssh/authorized_keys` yourself still count for the `auto` password setting.
+- **TLP handling removed.** No trixie task installs TLP, and kiln runs on fresh installs.
+- **Wi-Fi power saving:** left at Debian's default (the open question is closed).
+- **Download pinning:** nothing more. kiln downloads from the official sources the docs name and trusts them.
+- Saved choices for the removed options are ignored with a log line, so older `state.json` files still load.
 
 ## Proposals from the second verification pass
 
@@ -715,7 +732,7 @@ When a migration fails its check, the undo runs `ifup <iface>` from kiln's proce
 
 ## Open questions
 
-1. **Wi-Fi power saving on always-on machines.** On the test machine, the Wi-Fi link had 19–572 ms latency and 6.7% packet loss. After `iw dev <wlan> set power_save off` it dropped to 3–7 ms with no loss. kiln doesn't change Wi-Fi power saving today. The proposal is a new default-on option in the power step:
+1. **Closed (D50): left at Debian's default.** ~~Wi-Fi power saving on always-on machines.~~ On the test machine, the Wi-Fi link had 19–572 ms latency and 6.7% packet loss. After `iw dev <wlan> set power_save off` it dropped to 3–7 ms with no loss. kiln doesn't change Wi-Fi power saving today. The proposal is a new default-on option in the power step:
    - a NetworkManager drop-in `[connection] wifi.powersave = 2`, on machines where NetworkManager manages Wi-Fi;
    - plus `iw dev <wlan> set power_save off` for the current session.
 

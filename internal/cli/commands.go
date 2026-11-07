@@ -316,7 +316,7 @@ func newMirrorsCmd(info BuildInfo) *cobra.Command {
 func newSecretsCmd(info BuildInfo) *cobra.Command {
 	cmd := &cobra.Command{Use: "secrets", Short: "Stored secrets (root only)", Args: cobra.NoArgs}
 	cmd.AddCommand(&cobra.Command{
-		Use: "show [name]", Short: "Print a stored secret, such as the remote-desktop password", Args: cobra.MaximumNArgs(1),
+		Use: "show [name]", Short: "Print a stored secret, such as the Secure Boot one-time password", Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if os.Geteuid() != 0 {
 				return errors.New("only root can read stored secrets: sudo kiln secrets show")

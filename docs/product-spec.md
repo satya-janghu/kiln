@@ -17,7 +17,7 @@
    - It ends with a summary and offers a reboot.
 5. Later runs on the same machine start with that machine's previous choices ticked. Re-running only fixes what drifted. Everything else reports "unchanged".
 
-The owner is always physically present. kiln isn't designed to be run over SSH. If it detects an SSH session, it warns that network and firewall steps may disconnect you, but it doesn't refuse.
+The owner is always physically present. kiln isn't designed to be run over SSH. If it detects an SSH session, it warns that the network and SSH steps may disconnect you, but it doesn't refuse.
 
 ## Machines
 
@@ -39,22 +39,22 @@ The owner is always physically present. kiln isn't designed to be run over SSH. 
 | `kiln battery status\|apply\|watch` | Battery charge-limit helper, also used by systemd units | `apply` and `watch` do |
 | `kiln thermal apply` | At boot on ThinkPads: validates the thinkfan config once fan control is active, then enables thinkfan | Yes |
 | `kiln mirrors bench [--apply]\|reset` | Benchmarks mirrors by throughput, or goes back to `deb.debian.org` | `--apply` and `reset` do |
-| `kiln secrets show [name]` | Root only. Prints a stored secret, such as the remote-desktop password. | No |
+| `kiln secrets show [name]` | Root only. Prints a stored secret, such as the Secure Boot one-time password. | No |
 
 The wizard applies changes only on Linux, and only if `/etc/kiln/allow-apply` exists (`install.sh` creates it) or `--i-know-this-is-a-fresh-machine` is passed.
 
 ## Defaults: everything on
 
-- Every kiln step and sub-option starts checked. That includes the NVIDIA driver, remote desktop, trixie-backports, NetworkManager migration, zram, fail2ban, auto-updates, firmware updates, Flathub and the third-party repos.
+- Every kiln step and sub-option starts checked. That includes the NVIDIA driver, trixie-backports, NetworkManager migration, zram, fail2ban, auto-updates, firmware updates, Flathub and the third-party repos.
 - **One exception:** the backports kernel starts **off**. Every machine runs Debian's stock trixie kernel (6.12 LTS, kept on the latest version by normal upgrades) unless you select the backports kernel for that machine (D38).
 - A step that doesn't fit this machine stays checked but shows `not applicable: <reason>` and is skipped. The reason can be hardware (no NVIDIA GPU, no battery) or an installer choice (no GNOME, no SSH server).
 - To turn things off quickly, toggle a single item, toggle a whole category, or filter by text.
-- "On by default" doesn't mean reckless. Network migration, SSH and firewall changes are validated first, checked after applying, and reverted automatically if the check fails.
+- "On by default" doesn't mean reckless. Network migration and SSH changes are validated first, checked after applying, and reverted automatically if the check fails.
 
 ## Secrets
 
-- The only secret today is the remote-desktop password.
-- The wizard asks for it, masked, with a "generate one for me" choice. A generated password is shown once on screen.
+- The only secret today is the one-time password for enrolling kiln's Secure Boot key when NVIDIA modules need signing (D24). kiln generates it and shows it once on the summary screen.
+- There's no remote-desktop password any more: that step was removed (D50).
 - It's stored in `/etc/kiln/secrets/<name>` (directory 0700, file 0600, owned by root). `sudo kiln secrets show <name>` prints it again.
 - It's never written to logs, the summary file or `state.json`.
 

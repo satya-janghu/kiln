@@ -60,8 +60,6 @@ func Group(op sys.Op) string {
 		return "Packages"
 	case "systemctl":
 		return "Services"
-	case "firewall-cmd", "nft":
-		return "Firewall"
 	}
 	return "Commands"
 }

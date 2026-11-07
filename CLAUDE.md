@@ -70,8 +70,8 @@ These also follow from the design:
   - single-instance and per-helper `flock`s;
   - interrupted dpkg is repaired at the next start;
   - kiln never kills apt or dpkg.
-- **Risky changes are reverted on failure.** Network migration, SSH and firewall changes are validated first. Then the change is applied, checked, and reverted from the backup straight away if the check fails. A "change in progress" marker in `/etc/kiln/state.json` lets the next start offer a revert if kiln died mid-change.
-- **Secrets stay out of logs.** The remote-desktop password never reaches logs or the summary. It lives only in `/etc/kiln/secrets/` (0600).
+- **Risky changes are reverted on failure.** Network migration and SSH changes are validated first. Then the change is applied, checked, and reverted from the backup straight away if the check fails. A "change in progress" marker in `/etc/kiln/state.json` lets the next start offer a revert if kiln died mid-change.
+- **Secrets stay out of logs.** The Secure Boot one-time password never reaches logs or the summary file. It lives only in `/etc/kiln/secrets/` (0600).
 - **Large downloads go to `/var/tmp`, never `/tmp`,** because `/tmp` is a tmpfs on trixie.
 - **The code builds on darwin.** Linux-only code lives in `*_linux.go` files, with stubs for other platforms, so everything builds and lints there.
 

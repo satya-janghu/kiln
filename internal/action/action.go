@@ -18,7 +18,6 @@ const (
 	Packages Kind = "Packages"
 	Files    Kind = "Files"
 	Services Kind = "Services"
-	Firewall Kind = "Firewall"
 	Commands Kind = "Commands"
 )
 

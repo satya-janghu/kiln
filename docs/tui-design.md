@@ -93,7 +93,7 @@ These checks run in this order, each only when it applies:
   enter continue   f all facts   q quit
 ```
 
-If the session is over SSH, the Warnings line says: "You're connected over SSH. Network and firewall steps may disconnect you; kiln is meant to run at the machine."
+If the session is over SSH, the Warnings line says: "You're connected over SSH. The network and SSH steps may disconnect you; kiln is meant to run at the machine."
 
 ### 2. Step checklist
 
@@ -124,8 +124,7 @@ Steps are grouped by category, and everything starts checked, or pre-set from th
 
 Press `o` on an item to open a Huh form for that step's options, for example:
 - hostname and timezone;
-- GitHub user for SSH keys, extra keys and port;
-- remote-desktop password: masked, with a confirm field and a "generate one" choice;
+- SSH port and password logins;
 - battery target;
 - update scope;
 - mirror country.
@@ -134,14 +133,14 @@ Forms validate as you type: hostname rules, port range, and "GitHub user has no 
 
 ### 4. Review plan
 
-This screen is drawn from the same plan the runner will execute (rule 7). It has tabs: **Summary · Packages · Files · Services · Firewall · Commands**, all in scrollable viewports. Warnings come first:
+This screen is drawn from the same plan the runner will execute (rule 7). It has tabs: **Summary · Packages · Files · Services · Commands**, all in scrollable viewports. Warnings come first:
 
 ```
  Review: nothing has changed yet
   ! SSH password logins are on for satya and root, from anywhere SSH is reachable (D45). Use strong passwords.
   ! Network: enp2s0 moves from ifupdown to NetworkManager (reverted automatically if it fails).
-  214 packages · 31 files · 18 services · 6 firewall rules · reboot likely (new kernel)
- [Summary] Packages  Files  Services  Firewall  Commands
+  214 packages · 31 files · 18 services · reboot likely (new kernel)
+ [Summary] Packages  Files  Services  Commands
   ...
   enter start   esc back
 ```
@@ -161,8 +160,7 @@ The run screen shows:
   !! Battery limit: no charge control found on HP ENVY x360 13-ay0xxx.
       Look in BIOS/UEFI for "Battery Health Manager" or "Adaptive Battery Optimizer".
   Notes
-   - Cockpit: https://192.168.1.23:9090 (open to 192.168.1.0/24), log in as satya
-   - Docker: -p published ports bypass the firewall; bind private services to 127.0.0.1
+   - Cockpit: https://192.168.1.23:9090, log in as satya
    - Log out and back in for docker group membership
   Reboot needed: new kernel 7.2 (backports)
  ──────────────────────────────────────────────────────────────────────────────

@@ -183,7 +183,7 @@ func (m *model) factWarnings() []string {
 	f := m.a.Facts
 	var w []string
 	if f.SSHSession {
-		w = append(w, "You're connected over SSH. Network and firewall steps may disconnect you; kiln is meant to run at the machine.")
+		w = append(w, "You're connected over SSH. The network and SSH steps may disconnect you; kiln is meant to run at the machine.")
 	}
 	if !m.gateOK {
 		w = append(w, "kiln won't change this machine: "+m.gateWhy+". You can still look at the plan.")

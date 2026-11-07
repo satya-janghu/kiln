@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -26,7 +25,7 @@ import (
 	"github.com/satya-janghu/kiln/internal/sys"
 )
 
-// Paths used by this step and read by firewall and fail2ban.
+// Paths used by this step and read by fail2ban.
 const (
 	MainConfig   = "/etc/ssh/sshd_config"
 	DropInDir    = "/etc/ssh/sshd_config.d"
@@ -46,7 +45,7 @@ func New() step.Step { return Step{} }
 func (Step) ID() string          { return "ssh" }
 func (Step) Title() string       { return "SSH server and logins" }
 func (Step) Category() string    { return "security" }
-func (Step) DependsOn() []string { return []string{"firewall"} }
+func (Step) DependsOn() []string { return nil }
 
 // Applies always: kiln installs and enables the SSH server when it's missing (D45).
 func (Step) Applies(*step.Env) step.Applicability { return step.Yes() }
@@ -55,29 +54,8 @@ func (Step) Packages() []step.PackageRef {
 	return []step.PackageRef{{Name: "openssh-server", Suite: "trixie", Component: "main", Repo: "debian"}}
 }
 
-var githubUser = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
-
 func (Step) Options(*facts.Facts) []options.Field {
 	return []options.Field{
-		{Key: "github_user", Label: "GitHub user for keys", Kind: options.String, Default: "",
-			Help: "kiln adds the public keys from https://github.com/<user>.keys.",
-			Validate: func(v any) error {
-				if s, _ := v.(string); s != "" && !githubUser.MatchString(s) {
-					return errors.New("that isn't a valid GitHub user name")
-				}
-				return nil
-			}},
-		{Key: "extra_keys", Label: "Extra public keys", Kind: options.List, Default: []string{},
-			Help: "One per line, as in authorized_keys (e.g. ssh-ed25519 AAAA… me@laptop).",
-			Validate: func(v any) error {
-				l, _ := v.([]string)
-				for _, k := range l {
-					if _, ok := parseKey(k); !ok {
-						return fmt.Errorf("%q isn't a public key line", short(k))
-					}
-				}
-				return nil
-			}},
 		{Key: "port", Label: "Port", Kind: options.Int, Default: 22,
 			Validate: func(v any) error {
 				if n, _ := v.(int); n < 1 || n > 65535 {
@@ -105,13 +83,6 @@ func (Step) Options(*facts.Facts) []options.Field {
 				return nil
 			}},
 	}
-}
-
-func short(s string) string {
-	if len(s) > 40 {
-		return s[:40] + "…"
-	}
-	return s
 }
 
 // ---- keys ----
@@ -165,77 +136,6 @@ func installed(s sys.System, path string) (raw string, keys map[string]bool) {
 		}
 	}
 	return string(b), keys
-}
-
-type wanted struct {
-	key pubkey
-	tag string // kiln:github or kiln:manual
-}
-
-// fetchGitHub reads https://github.com/<user>.keys (plain text, one key per line).
-func fetchGitHub(ctx context.Context, s sys.System, user string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	b, err := s.HTTPGet(ctx, "https://github.com/"+user+".keys", 256<<10)
-	var he *sys.HTTPError
-	if errors.As(err, &he) && he.Status == 404 {
-		return nil, fmt.Errorf("GitHub user %q doesn't exist; fix \"GitHub user for keys\" in the SSH options", user)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("couldn't fetch the keys of GitHub user %q (%w); check the network, or clear the GitHub user in the SSH options", user, err)
-	}
-	var out []string
-	for _, l := range strings.Split(string(b), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			out = append(out, l)
-		}
-	}
-	return out, nil
-}
-
-// desired returns the keys the options ask for, plus what was skipped.
-func desired(ctx context.Context, env *step.Env) (keys []wanted, skipped []string, err error) {
-	var gh []string
-	if u := env.Opts.String("github_user"); u != "" {
-		if gh, err = fetchGitHub(ctx, env.Sys, u); err != nil {
-			return nil, nil, err
-		}
-		if len(gh) == 0 {
-			skipped = append(skipped, fmt.Sprintf("GitHub user %s has no public keys", u))
-		}
-	}
-	seen := map[string]bool{}
-	add := func(lines []string, tag string) {
-		for _, l := range lines {
-			k, ok := parseKey(l)
-			switch {
-			case !ok:
-				skipped = append(skipped, fmt.Sprintf("%q isn't a valid public key", short(l)))
-			case k.typ == "ssh-dss":
-				skipped = append(skipped, "a DSA (ssh-dss) key, which OpenSSH 10 no longer supports")
-			case !seen[k.id()]:
-				seen[k.id()] = true
-				keys = append(keys, wanted{key: k, tag: tag})
-			}
-		}
-	}
-	add(gh, "kiln:github")
-	add(env.Opts.List("extra_keys"), "kiln:manual")
-	return keys, skipped, nil
-}
-
-// validWithKeygen checks one key with `ssh-keygen -l -f <tmp>` (catalog step 15.1).
-func validWithKeygen(ctx context.Context, s sys.System, k pubkey) bool {
-	if err := s.MkdirAll("/run/kiln", 0o755, nil); err != nil {
-		return false
-	}
-	tmp := "/run/kiln/ssh-key-check.pub"
-	if _, err := s.WriteFile(tmp, []byte(k.line+"\n"), sys.WriteOpts{Mode: 0o600, NoBackup: true}); err != nil {
-		return false
-	}
-	_, err := s.Query(ctx, sys.Cmd{Name: "ssh-keygen", Args: []string{"-l", "-f", tmp}})
-	_ = s.RemoveAll(tmp)
-	return err == nil
 }
 
 // ---- sshd configuration ----
@@ -349,12 +249,6 @@ func CurrentPorts(ctx context.Context, s sys.System) []int {
 	return out
 }
 
-// FirewallSync is set by the firewall step's package (which imports this one,
-// so this package can't call it directly). After a port change is committed,
-// the ssh step calls it with the ports sshd listened on before the change, so
-// the firewall closes the ones sshd no longer uses only once the new port works.
-var FirewallSync func(ctx context.Context, s sys.System, env *step.Env, before []int) error
-
 // portTaken reports whether something other than sshd already listens on TCP
 // port (`ss -H -l -t -n -p sport = :<port>`), and who. Read-only.
 func portTaken(ctx context.Context, s sys.System, port int) (who string, taken bool) {
@@ -451,8 +345,8 @@ func rootNeedsPassword(env *step.Env) bool {
 }
 
 // WillHaveServer reports whether this run ends with an SSH server: already
-// installed, or the ssh step (which installs it, D45) is ticked. The firewall
-// and fail2ban steps use it.
+// installed, or the ssh step (which installs it, D45) is ticked. The fail2ban
+// step uses it.
 func WillHaveServer(env *step.Env) bool {
 	return env.Facts.SSHServer || env.All.IsEnabled("ssh")
 }
@@ -581,16 +475,7 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 	if rootNeedsPassword(env) {
 		return step.Todo("root has no password yet"), nil
 	}
-	want, _, err := desired(ctx, env)
-	if err != nil {
-		return step.Todo("%s", err.Error()), nil
-	}
 	_, have := installed(env.Sys, authorizedKeys(env))
-	for _, w := range want {
-		if !have[w.key.id()] {
-			return step.Todo("a %s key isn't in %s yet", w.key.typ, authorizedKeys(env)), nil
-		}
-	}
 	socket := SocketMode(ctx, env.Sys)
 	pa := passwordAuth(env, len(have))
 	if b, err := env.Sys.ReadFile(DropIn); err != nil || string(b) != string(dropInContent(env, pa, socket)) {
@@ -608,22 +493,9 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 }
 
 func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
-	want, skipped, err := desired(ctx, env)
-	if err != nil {
-		return nil, err
-	}
-	for _, sk := range skipped {
-		env.Notes.Add("SSH keys: skipped %s.", sk)
-	}
 	akPath := authorizedKeys(env)
 	_, have := installed(env.Sys, akPath)
-	var missing []wanted
-	for _, w := range want {
-		if !have[w.key.id()] {
-			missing = append(missing, w)
-		}
-	}
-	predicted := len(have) + len(missing)
+	predicted := len(have)
 	socket := SocketMode(ctx, env.Sys)
 	port := Port(env)
 
@@ -636,11 +508,11 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		if env.Opts.String("password_logins") == "auto" {
 			msg += " because no SSH key is installed for " + env.User().Name
 		}
-		msg += ", from anywhere SSH is reachable (D45). The firewall keeps SSH open to the internet and fail2ban slows down guessing, but a guessed password gives root access. Use strong passwords, or turn password logins off in the SSH options."
+		msg += ", from anywhere SSH is reachable (D45). fail2ban slows down guessing, but a guessed password gives root access. Use strong passwords, or turn password logins off in the SSH options."
 		env.Notes.Warn("%s", msg)
 		env.Notes.Add("%s", msg)
 	} else if predicted == 0 {
-		env.Notes.Warn("SSH password logins will be off, but no SSH key is installed for %s, so nobody can log in to this machine over SSH. Add a GitHub user or a public key in the SSH options, or set password logins to \"Off once at least one key is installed\".", env.User().Name)
+		env.Notes.Warn("SSH password logins will be off, but no SSH key is installed for %s, so nobody can log in to this machine over SSH. Add your key to %s yourself first, or set password logins to \"On\".", env.User().Name, akPath)
 	}
 	if !slices.Contains(CurrentPorts(ctx, env.Sys), port) {
 		if who, taken := portTaken(ctx, env.Sys, port); taken {
@@ -687,13 +559,6 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 			},
 		})
 	}
-	if len(missing) > 0 {
-		acts = append(acts, action.Custom{
-			Desc: fmt.Sprintf("add %d public key(s) to %s (each checked with ssh-keygen -l first; existing lines are kept, 0600, directory 0700, owned by %s)", len(missing), akPath, env.User().Name),
-			K:    action.Files,
-			Fn:   func(ctx context.Context, s sys.System) error { return mergeKeys(ctx, s, env, akPath, missing) },
-		})
-	}
 	desc := fmt.Sprintf("write %s (PermitRootLogin %s, MaxAuthTries %d, X11Forwarding no, PasswordAuthentication %s", DropIn, rootLogin(env), env.Opts.Int("max_auth_tries"), passwordAuth(env, predicted))
 	if port != 22 {
 		if socket {
@@ -702,7 +567,7 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 			desc += fmt.Sprintf(", Port %d", port)
 		}
 	}
-	desc += fmt.Sprintf("), check that port %d is free and the config passes sshd -t, apply it, then wait up to %s for sshd to listen on port %d with the expected sshd -T -C values; put the previous files back if anything fails, and once it works close any SSH port sshd no longer uses in the firewall", port, listenDeadline, port)
+	desc += fmt.Sprintf("), check that port %d is free and the config passes sshd -t, apply it, then wait up to %s for sshd to listen on port %d with the expected sshd -T -C values; put the previous files back if anything fails", port, listenDeadline, port)
 	acts = append(acts, action.Custom{
 		Desc: desc,
 		K:    action.Services,
@@ -716,34 +581,6 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		},
 	})
 	return acts, nil
-}
-
-func mergeKeys(ctx context.Context, s sys.System, env *step.Env, path string, missing []wanted) error {
-	raw, have := installed(s, path)
-	var add []string
-	for _, w := range missing {
-		if have[w.key.id()] {
-			continue
-		}
-		if !s.DryRun() && !validWithKeygen(ctx, s, w.key) {
-			env.Notes.Add("SSH keys: skipped a %s key that ssh-keygen rejected.", w.key.typ)
-			continue
-		}
-		add = append(add, w.key.line+" "+w.tag)
-		have[w.key.id()] = true
-	}
-	if len(add) == 0 {
-		return nil
-	}
-	u := env.User()
-	if err := s.MkdirAll(filepath.Dir(path), 0o700, u); err != nil {
-		return err
-	}
-	if raw != "" && !strings.HasSuffix(raw, "\n") {
-		raw += "\n"
-	}
-	_, err := s.WriteFile(path, []byte(raw+strings.Join(add, "\n")+"\n"), sys.WriteOpts{Mode: 0o600, Owner: u})
-	return err
 }
 
 // applyConfig is the verify-then-revert sequence (catalog step 15.4).
@@ -808,14 +645,5 @@ func applyConfig(ctx context.Context, s sys.System, env *step.Env, pa string, so
 	if err := revert.Poll(ctx, listenDeadline, time.Second, func() error { return verify(ctx, s, env, pa, socket) }); err != nil {
 		return undo(fmt.Errorf("SSH didn't come back as expected: %w", err))
 	}
-	if err := revert.Commit(s, env.State); err != nil {
-		return err
-	}
-	// The firewall kept the old port open until now; close what sshd no longer uses.
-	if FirewallSync != nil {
-		if err := FirewallSync(ctx, s, env, before); err != nil {
-			env.Notes.Add("SSH now works on port %d, but closing the SSH port(s) it no longer uses in the firewall failed: %v. Run kiln again to retry.", port, err)
-		}
-	}
-	return nil
+	return revert.Commit(s, env.State)
 }

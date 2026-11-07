@@ -10,7 +10,7 @@
    - sources.debian.org (for Debian's shipped config and maintainer scripts);
    - the trixie release notes;
    - kernel.org documentation and the ABI;
-   - upstream docs (Docker, firewalld, GNOME, Charm, Go).
+   - upstream docs (Docker, GNOME, Charm, Go).
 
    Blogs, forums and memory don't count. Each fact is recorded in [debian13-notes.md](debian13-notes.md) with its URL and the date it was checked. Code may only rely on facts marked **V** there.
 2. **Static analysis** (review tooling, not tests). These must be clean:
@@ -50,7 +50,7 @@ Everything goes into `/tmp/kiln-field-<hostname>.txt`, which is the only file it
 Reviews can't catch everything a real machine might do. These features stay in the design for that reason:
 - **The review screen** shows the exact plan before anything changes. It comes from the same code path as the real run.
 - **Backups:** copies of every file kiln changes, in `/var/lib/kiln/backup/`.
-- **Verify, then revert** for network, SSH and firewall changes, plus an interrupted-change prompt on the next start.
+- **Verify, then revert** for network and SSH changes, plus an interrupted-change prompt on the next start.
 - **A failed step never stops the run,** and the summary says what to do next.
 - **A full log** in `/var/log/kiln.log`.
 
@@ -86,12 +86,12 @@ kiln is ready for production when all of the following hold:
 | power | implemented | | |
 | thermal | implemented | | |
 | battery | implemented | | |
-| firewall | implemented | | |
+| firewall | removed (D50) | | |
 | ssh | implemented | | |
 | fail2ban | implemented | | |
 | docker | implemented | | |
 | cockpit | implemented | | |
-| remote-desktop | implemented | | |
+| remote-desktop | removed (D50) | | |
 | autoupdates | implemented | | |
 | node | implemented | | |
 | python | implemented | | |

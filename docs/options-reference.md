@@ -47,14 +47,8 @@ Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (
 | battery | target stop % | 80 | the ladder tries values below 90, nearest to this first |
 | battery | start gap | 5 | start = stop − gap, where supported |
 | battery | software fallback (inhibit-charge watcher) | on | |
-| firewall | backend | firewalld | `firewalld` or `nftables` |
-| firewall | LAN subnets | auto | RFC1918 IPv4 + IPv6 ULA on physical NICs, or a list of CIDRs |
-| firewall | extra open ports | none | open to the internet, e.g. `8080/tcp`; shown as a warning on review |
-| firewall | block Docker published ports | off | firewalld `StrictForwardPorts=yes` |
-| ssh | GitHub user for keys | empty | fetches `https://github.com/<user>.keys` |
-| ssh | extra public keys | none | |
 | ssh | port | 22 | |
-| ssh | password logins | on | `on` (D45), `auto` = off once at least one key is installed, or `off` |
+| ssh | password logins | on | `on` (D45), `auto` = off once at least one key is in `~/.ssh/authorized_keys` (kiln adds none, D50), or `off` |
 | ssh | allow root to log in | on | `PermitRootLogin yes` (D45) |
 | ssh | give root your user's password if it has none | on | copies the password hash (D45) |
 | ssh | MaxAuthTries | 4 | the owner's choice (upstream default 6); agents offering many keys need `IdentitiesOnly` on the client |
@@ -62,8 +56,6 @@ Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (
 | docker | log rotation | 10m × 3 | json-file driver |
 | docker | run hello-world | on | |
 | cockpit | from backports | on | falls back to trixie main if backports is off |
-| remote-desktop | RDP user name | target user | |
-| remote-desktop | RDP password | asked | masked, with "generate one"; stored in `/etc/kiln/secrets/rdp` |
 | autoupdates | scope | all | `all` = every package from every configured repository (`origin=*`); `security` = Debian security only (D40) |
 | autoupdates | schedule | every 12 h | refresh at about 06:00 and 18:00, upgrade 30 min later (timer overrides on Debian's 06/18 slots); skipped on battery |
 | autoupdates | automatic reboot | off | |
@@ -86,7 +78,6 @@ This table is generated from the code with `go run ./cmd/kiln catalog options`; 
 
 Additional cases:
 - The NVIDIA options (`multimedia.nvidia`, `multimedia.nvidia_source`) appear only on machines with an NVIDIA GPU, so they're missing from a list generated on a machine without one.
-- `firewall.backend = nftables` is listed but disabled with a reason until its ruleset is specified (D43).
 
 | Key | Label | Type | Default |
 |---|---|---|---|
@@ -142,14 +133,7 @@ Additional cases:
 | `battery.target_stop` | Stop charging at (%) | int | 80 |
 | `battery.start_gap` | Start charging this many points lower | int | 5 |
 | `battery.software_fallback` | Software fallback (inhibit-charge watcher) | bool | true |
-| `firewall` | *step on/off* | bool | on |
-| `firewall.backend` | Firewall | choice | firewalld [firewalld/nftables] |
-| `firewall.lan_subnets` | LAN subnets | list | [auto] |
-| `firewall.extra_ports` | Extra open ports | list | [] |
-| `firewall.strict_docker_ports` | Block Docker published ports | bool | false |
 | `ssh` | *step on/off* | bool | on |
-| `ssh.github_user` | GitHub user for keys | string | (empty) |
-| `ssh.extra_keys` | Extra public keys | list | [] |
 | `ssh.port` | Port | int | 22 |
 | `ssh.password_logins` | Password logins | choice | on [on/auto/off] |
 | `ssh.root_login` | Allow root to log in over SSH | bool | true |
@@ -165,9 +149,6 @@ Additional cases:
 | `docker.hello_world` | Run hello-world | bool | true |
 | `cockpit` | *step on/off* | bool | on |
 | `cockpit.backports` | Cockpit from trixie-backports | bool | true |
-| `remote-desktop` | *step on/off* | bool | on |
-| `remote-desktop.username` | RDP user name | string | (empty) |
-| `remote-desktop.password` | RDP password | secret | (empty) |
 | `autoupdates` | *step on/off* | bool | on |
 | `autoupdates.scope` | What updates automatically | choice | all [all/security] |
 | `autoupdates.schedule` | Schedule | choice | 12h [12h] |

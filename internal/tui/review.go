@@ -14,7 +14,7 @@ import (
 // Screen 4: review. Drawn from runner.Preview, the same code path as the
 // real run (rule 7).
 
-var tabs = []string{"Summary", "Packages", "Files", "Services", "Firewall", "Commands"}
+var tabs = []string{"Summary", "Packages", "Files", "Services", "Commands"}
 
 type reviewState struct {
 	gen      int // bumped every time the options may have changed
@@ -180,7 +180,6 @@ func serviceUnits(op sys.Op) []string {
 
 func (m *model) reviewStats(pv *runner.Preview) string {
 	pkgs, files, units := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	fw := 0
 	for _, s := range pv.Steps {
 		for _, op := range s.Ops {
 			switch runner.Group(op) {
@@ -194,8 +193,6 @@ func (m *model) reviewStats(pv *runner.Preview) string {
 				for _, u := range serviceUnits(op) {
 					units[u] = true
 				}
-			case "Firewall":
-				fw++
 			}
 		}
 	}
@@ -203,7 +200,6 @@ func (m *model) reviewStats(pv *runner.Preview) string {
 		plural(len(pkgs), "package", "packages"),
 		plural(len(files), "file", "files"),
 		plural(len(units), "service", "services"),
-		plural(fw, "firewall rule", "firewall rules"),
 	}
 	if len(pv.Reboot) > 0 {
 		parts = append(parts, "reboot likely ("+strings.Join(pv.Reboot, "; ")+")")

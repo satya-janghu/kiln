@@ -11,7 +11,6 @@ import (
 	"github.com/satya-janghu/kiln/internal/steps/devtools"
 	"github.com/satya-janghu/kiln/internal/steps/docker"
 	"github.com/satya-janghu/kiln/internal/steps/fail2ban"
-	"github.com/satya-janghu/kiln/internal/steps/firewall"
 	"github.com/satya-janghu/kiln/internal/steps/firmware"
 	"github.com/satya-janghu/kiln/internal/steps/fwupd"
 	"github.com/satya-janghu/kiln/internal/steps/golang"
@@ -23,7 +22,6 @@ import (
 	"github.com/satya-janghu/kiln/internal/steps/power"
 	"github.com/satya-janghu/kiln/internal/steps/preflight"
 	"github.com/satya-janghu/kiln/internal/steps/python"
-	"github.com/satya-janghu/kiln/internal/steps/rdp"
 	"github.com/satya-janghu/kiln/internal/steps/repos"
 	"github.com/satya-janghu/kiln/internal/steps/ssh"
 	"github.com/satya-janghu/kiln/internal/steps/sudo"
@@ -50,12 +48,10 @@ func Steps() []step.Step {
 		power.New(),
 		thermal.New(),
 		battery.New(),
-		firewall.New(),
 		ssh.New(),
 		fail2ban.New(),
 		docker.New(),
 		cockpit.New(),
-		rdp.New(),
 		autoupdates.New(),
 		node.New(),
 		python.New(),

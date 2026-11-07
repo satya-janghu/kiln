@@ -66,7 +66,7 @@ Every action is a typed value with `Describe() string` (used for the review scre
 - **Packages:** `AptUpdate`, `AptInstall{Pkgs, Suite}`, `AptRemove`, `DebconfSet`.
 - **Files:** `WriteFile{Path, Content, Mode, Owner, Comment}`, `EditKeys` (key-level edit of an ini-style file, used for GDM's greeter defaults), `Symlink`, `RemoveFile`.
 - **Services:** `ServiceEnable`, `ServiceDisable`, `ServiceMask`, `ServiceRestart`, `ServiceReload`.
-- **System settings:** `UserAddGroup`, `Sysctl`, `SysfsWrite`, `FirewallRule`.
+- **System settings:** `UserAddGroup`, `Sysctl`, `SysfsWrite`.
 - **Downloads:** steps call `sys.System.Fetch` (sha256-verified, into the run's private directory) inside `Custom` actions; piped installers are a pinned Fetch followed by `bash <file>` as the user.
 - **Commands:** `Command{Name, Args, Stdin, AsUser, Env}`. `Stdin` is how secrets are passed (never in argv).
 - **`Custom{Desc, Fn}`:** for steps that need runtime feedback, such as the battery ladder, the mirror bench and network migration. Its `Desc` must still say exactly what it will try.
@@ -76,7 +76,7 @@ Every action is a typed value with `Describe() string` (used for the review scre
 The wizard's review screen and `kiln plan` use the same runner as the real run. The only difference is which `sys.System` they pass to `Apply`:
 
 - **The real run uses `sys.Real`.**
-- **The preview uses `sys.Recorder`.** It records every call, returns success, and changes nothing. It groups what it recorded into packages, files, services, firewall and commands.
+- **The preview uses `sys.Recorder`.** It records every call, returns success, and changes nothing. It groups what it recorded into packages, files, services and commands.
 - **`Check` always reads the real system, read-only,** so the preview shows what would actually change on this machine.
 
 ## Runner
@@ -101,7 +101,6 @@ kiln changes a live system for 15–40 minutes, and anything can happen in that 
 
 - **Strictly sequential.** The runner executes one step at a time and one action at a time. Every action waits for its process to **exit** and checks the exit code before the next one starts. Nothing runs in the background except the inhibitor and the UI.
 - **"Started" isn't "ready".** Commands like `systemctl start`, `systemctl reload` and `apt install` of a service return before that service is actually ready. So every post-change check **polls until a deadline** instead of checking once:
-  - `firewall-cmd --state` = running: up to 30 s;
   - sshd listening on its port: up to 15 s. sshd re-execs itself on SIGHUP, so a single check right after `reload` can see a closed port and wrongly trigger a revert.
   - `fail2ban-client ping`: up to 30 s;
   - `docker info`: up to 60 s;
@@ -194,13 +193,13 @@ kiln may run inside GNOME Terminal. Closing that window, logging out, or a displ
 
 ## Risky changes: verify, then revert on failure
 
-Network migration, SSH and firewall changes go through `internal/revert`. You're at the console, so there's no remote session to protect, and the danger is a box that's left half-configured. The pattern is:
+Network migration and SSH changes go through `internal/revert`. You're at the console, so there's no remote session to protect, and the danger is a box that's left half-configured. The pattern is:
 
-1. **Validate offline first:** `sshd -t`, `firewall-cmd --check-config`, and a parsed-back check of NetworkManager profiles.
+1. **Validate offline first:** `sshd -t` and a parsed-back check of NetworkManager profiles.
 2. **Record a `pending` entry in `state.json`,** with the backups (paths under `/var/lib/kiln/backup/`) and how to undo the change.
 3. **Apply the change in place,** using reload where possible.
-4. **Check it locally.** For SSH, `sshd` is listening on the configured port and `sshd -T` shows the expected values. For the firewall, the expected zones and services are present, and so is SSH if an SSH server is installed. For the network, the link is up, the default route exists, DNS resolves, and HTTPS to `deb.debian.org` works.
-5. **If the check passes,** clear `pending`. firewalld changes are written as permanent config files and applied with `--reload`, because `--new-zone` exists only as a permanent change, so the backup of `/etc/firewalld/` is the undo. **If it fails,** restore the backups, restart the previous service, clear `pending`, and record `failed` with what to try.
+4. **Check it locally.** For SSH, `sshd` is listening on the configured port and `sshd -T` shows the expected values. For the network, the link is up, the default route exists, DNS resolves, and HTTPS to `deb.debian.org` works.
+5. **If the check passes,** clear `pending`. **If it fails,** restore the backups, restart the previous service, clear `pending`, and record `failed` with what to try.
 6. **If kiln died mid-change,** the next start finds `pending`. Before anything else, the wizard offers "A network change didn't finish. Revert it?".
 
 ## Safety gate

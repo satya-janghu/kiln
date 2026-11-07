@@ -16,7 +16,6 @@ import (
 	"github.com/satya-janghu/kiln/internal/options"
 	"github.com/satya-janghu/kiln/internal/revert"
 	"github.com/satya-janghu/kiln/internal/step"
-	"github.com/satya-janghu/kiln/internal/steps/firewall"
 	"github.com/satya-janghu/kiln/internal/steps/ssh"
 	"github.com/satya-janghu/kiln/internal/sys"
 )
@@ -38,7 +37,7 @@ func New() step.Step { return Step{} }
 func (Step) ID() string          { return "fail2ban" }
 func (Step) Title() string       { return "Block SSH password guessing (fail2ban)" }
 func (Step) Category() string    { return "security" }
-func (Step) DependsOn() []string { return []string{"ssh", "firewall"} }
+func (Step) DependsOn() []string { return []string{"ssh"} }
 
 func (Step) Packages() []step.PackageRef {
 	out := make([]step.PackageRef, 0, len(packages))
@@ -79,7 +78,7 @@ func (Step) Options(*facts.Facts) []options.Field {
 }
 
 func jailContent(ctx context.Context, env *step.Env) []byte {
-	ignore := append([]string{"127.0.0.1/8", "::1"}, firewall.LANSubnets(env)...)
+	ignore := append([]string{"127.0.0.1/8", "::1"}, env.Facts.LANStrings()...)
 	var ports []string
 	for _, p := range ssh.ListenPorts(ctx, env) {
 		ports = append(ports, strconv.Itoa(p))
@@ -95,6 +94,8 @@ func jailContent(ctx context.Context, env *step.Env) []byte {
 	b.WriteString("enabled = true\n")
 	b.WriteString("backend = systemd\n")
 	b.WriteString("port = " + strings.Join(ports, ",") + "\n")
+	// trixie's jail.d/defaults-debian.conf sets banaction_allports =
+	// nftables[type=allports]; nftables is priority "important", so present.
 	b.WriteString("banaction = %(banaction_allports)s\n")
 	b.WriteString("journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd + _COMM=sshd-session\n")
 	return []byte(b.String())

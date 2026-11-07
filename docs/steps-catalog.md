@@ -435,7 +435,7 @@ After that, the backports metapackage brings each newer backports kernel. The `a
 - **Power manager:**
   - **With GNOME:** `power-profiles-daemon` (pulled in by GNOME), set with `powerprofilesctl set performance`. The choice persists in `/var/lib/power-profiles-daemon/state.ini`. ppd only offers `performance` when amd-pstate is in active (EPP) mode, or when `platform_profile_choices` lists both balanced and performance. If it isn't offered (possible on the 4500U with acpi-cpufreq), keep `balanced` and note it (fact R).
   - **Without GNOME:** `tuned`, with a kiln profile `/etc/tuned/profiles/kiln-performance/tuned.conf` containing `[main] include=throughput-performance` and `[sysctl] vm.swappiness=60`. `throughput-performance` sets `vm.swappiness=10`, which works against zram, so kiln restores the kernel default. Then `tuned-adm profile kiln-performance`.
-  - **Never both.** If switching, stop, disable and remove the other. Never install TLP; if TLP is present, warn and stop it.
+  - **Never both.** If switching, stop, disable and remove the other. Never install TLP. No trixie task installs TLP, so kiln doesn't look for it (D50).
 
 **Check:** the targets are masked, the logind drop-in matches, the dconf keys and locks are present (GNOME), the greeter keys are uncommented, and the active profile is `performance` (or the noted fallback) / `kiln-performance`.
 
@@ -561,47 +561,15 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 
 ## 14. firewall
 
-**ID** `firewall` · security · depends: preflight, ssh options (for the port) · **risky** · option: backend (default firewalld)
-
-**Facts used** (firewalld 2.3.1):
-- **Installing starts it.** Debian enables and starts firewalld on install, with default zone `public`. `public` allows `ssh` and `dhcpv6-client` and rejects everything else (ICMP is allowed).
-- **Services:** the shipped definitions include `cockpit` (9090/tcp), `rdp` (3389/tcp) and `ssh` (22/tcp).
-- **Zones:** `--new-zone` exists only with `--permanent`. Source-based zones take LAN packets exclusively, because there's no zone drifting.
-- **Reloads:** a reload only replaces `table inet firewalld`, so fail2ban's `f2b-table` survives.
-- **`--check-config`** checks the permanent config.
-
-**Actions (firewalld):**
-1. Back up `/etc/firewalld/` (tarball under `/var/lib/kiln/backup/`) and record `pending`.
-2. Install `firewalld`. It starts immediately with `public`, which already allows SSH on port 22.
-3. LAN subnets: auto-detect private IPv4 (RFC1918: 10/8, 172.16/12, 192.168/16) and IPv6 ULA (fc00::/7) subnets on physical NICs only. Skip `lo docker* br-* veth* virbr* tun* tap* wg* tailscale*`. Global IPv6 prefixes are never treated as LAN (D20).
-4. Write the permanent config as **managed files**, so re-runs replace them wholesale:
-   - `/etc/firewalld/zones/kiln-lan.xml`: `<source address=…/>` for each LAN subnet, plus services `cockpit`, `rdp` (only if GNOME is detected) and `ssh` (only if an SSH server is detected). It also gets the custom SSH port as a `<port>` when it isn't 22. LAN packets are handled **only** by `kiln-lan`, so a port opened only in `public` would lock LAN clients out.
-   - Custom SSH port: added to `public` as well, with `firewall-cmd --permanent --zone=public --add-port=<n>/tcp`. If the port changed from an old custom value, the old one is removed.
-   - Extra open ports from the options go to `public`.
-   - No LAN detected: no `kiln-lan` file. Cockpit/RDP stay closed, with a note that Cockpit is then only reachable locally (`https://localhost:9090`) or through an SSH tunnel (`ssh -L 9090:localhost:9090 <user>@<host>`).
-   - Option "block Docker published ports": `StrictForwardPorts=yes` in `/etc/firewalld/firewalld.conf` (key-level edit).
-5. `firewall-cmd --check-config`, then `firewall-cmd --reload`, then check that:
-   - `firewall-cmd --state` is running;
-   - `--get-active-zones` shows `kiln-lan` bound to the expected sources;
-   - `--zone=kiln-lan --list-all` and `--zone=public --list-all` match.
-6. If the check passes, clear `pending`. If **this run changed** the firewall config and Docker is installed and running, `systemctl restart docker`, so its `docker` zone and policy are recreated. That restarts containers, so it never happens on an unchanged re-run.
-
-   If it fails: restore the `/etc/firewalld/` backup and `firewall-cmd --reload`. If this step installed firewalld, run `systemctl disable --now firewalld` instead. Record `failed`.
-
-**Check:** firewalld is active, the default zone is `public` with `ssh` (when an SSH server is detected) and the custom port, `kiln-lan.xml` matches the expected content, and the active zones match.
-
-**Gotchas:**
-- **Published ports:** Docker-published ports (`-p`) bypass zone rules while `StrictForwardPorts=no` (the default; D16). Docker puts its bridges in a `docker` zone (target ACCEPT, so containers can reach every host port) with a `docker-forwarding` policy. The summary always says: "bind private services to 127.0.0.1 or a LAN IP".
-- **Docker version:** Docker ≥ 28.3.3 is needed for the fix where a firewalld reload made loopback-bound published ports reachable from the LAN. Current Docker CE is 29.9.3. Trixie's own `docker.io` is 26.1.5, so use Docker's repo.
-- **nftables alternative:** it must never use Debian's stock `/etc/nftables.conf` or `nftables.service`. The stock file starts with `flush ruleset`, and the service's stop runs `nft flush ruleset`; both would wipe Docker's and fail2ban's tables. Docker's docs also don't support hand-written `nft` rules alongside Docker. So the nftables backend owns only `table inet kiln`, loaded by a `kiln-firewall.service` that runs `nft delete table inet kiln` (ignored if absent) then `nft -f /etc/kiln/firewall.nft`. With Docker installed, kiln recommends firewalld.
+**Removed (D50).** kiln doesn't set up a firewall: a fresh Debian install has none active, and kiln leaves it that way. fail2ban still bans through nftables (step 16), Cockpit listens on all networks (step 18), and SSH needs no port opening.
 
 ---
 
 ## 15. ssh
 
-**ID** `ssh` · security · depends: firewall (for a custom port) · **risky**
+**ID** `ssh` · security · **risky**
 
-**Purpose:** make sure SSH works with your user's and root's passwords (D45), plus keys, for later remote access. kiln itself is run at the console.
+**Purpose:** make sure SSH works with your user's and root's passwords (D45), for later remote access. kiln itself is run at the console.
 
 **Applies:** always. If the installer didn't install an SSH server, this step installs `openssh-server` and enables `ssh.service` (D45; this reverses D29 for SSH only).
 
@@ -615,16 +583,12 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 **Actions:**
 1. **Server.** Install `openssh-server` if missing, and `systemctl enable --now ssh.service` if it isn't enabled (unless `ssh.socket` was enabled by hand).
 2. **Root password** (option on): if root's `/etc/shadow` password field is locked or empty (`!`, `*`, or blank) and the target user has a password, copy the user's password **hash** to root with `chpasswd -e` (the `root:<hash>` line goes on stdin, never argv, and the output isn't logged). root then has the same password as the user, and kiln never sees the password itself. If the user has no password either, a note says to run `sudo passwd root`.
-3. **Keys.**
-   - Fetch `https://github.com/<GitHub user>.keys` over HTTPS, with a size cap and a 10 s timeout. A 404 means the user doesn't exist, which is an error in the options form. A 200 with an empty body means "no public keys". The endpoint is undocumented but stable: plain text, one `type base64` per line.
-   - Add the extra keys from the options.
-   - Validate each line by writing it to a temp file and running `ssh-keygen -l -f <tmp>`. `ssh-dss` lines are skipped with a note.
-   - Merge into `<home>/.ssh/authorized_keys` (0600, directory 0700, owned by the user). Deduplicate on key type + blob, never on the whole line. Only missing keys are added, and nothing is ever removed. Added lines get a trailing comment ` kiln:github` or ` kiln:manual`.
+3. **Keys:** kiln doesn't add SSH keys (D50). It only counts the valid keys already in `<home>/.ssh/authorized_keys`, for the `auto` password setting below.
 4. **Drop-in** `/etc/ssh/sshd_config.d/10-kiln.conf`:
    - `PermitRootLogin yes` (option "Allow root to log in over SSH", on by default, D45), `MaxAuthTries 4` (the owner's choice), `X11Forwarding no`.
-   - `PasswordAuthentication yes` by default (option "Password logins": `on`, D45). The other values are `auto` (off once at least one key is installed) and `off`. When passwords are on, the review screen and summary warn that password logins for the user and root are open to anywhere SSH is reachable, and that the firewall keeps SSH open to the internet, with fail2ban slowing down guessing.
+   - `PasswordAuthentication yes` by default (option "Password logins": `on`, D45). The other values are `auto` (off once at least one key is installed) and `off`. When passwords are on, the review screen and summary warn that password logins for the user and root are open to anywhere SSH is reachable, with fail2ban slowing down guessing.
    - `KbdInteractiveAuthentication no` is left out, because Debian already sets it.
-5. **Port** (when it isn't 22): `Port <n>` in the drop-in. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`. The firewall step has already opened the port in both zones.
+5. **Port** (when it isn't 22): `Port <n>` in the drop-in. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`.
 6. **Verify, then revert on failure:**
    1. Record `pending` and validate with `sshd -t`.
    2. Apply with `systemctl reload ssh`.
@@ -634,7 +598,7 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
       - `sshd -T -C user=<target>,host=<hostname>,addr=<lan-ip>` shows the expected values. Without `-C`, `-T` ignores `Match` blocks, so a `Match User` block that re-enables passwords would go unseen.
    4. If anything fails, restore the previous drop-in, reload, and record `failed`.
 
-**Check:** `openssh-server` is installed and `ssh.service` enabled, root has a password (when the option is on and the user has one), the keys are present, the drop-in matches, the `sshd -T -C …` values match, and the port is listening.
+**Check:** `openssh-server` is installed and `ssh.service` enabled, root has a password (when the option is on and the user has one), the drop-in matches, the `sshd -T -C …` values match, and the port is listening.
 
 **Gotchas:** the service is `ssh` (`sshd.service` is an alias). `MaxAuthTries 4` can lock out SSH agents that offer more than 4 keys before the right one. The summary notes `IdentitiesOnly yes` / `IdentityFile` as the client-side fix. Router port forwarding is manual, so it's only noted.
 
@@ -642,19 +606,19 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 
 ## 16. fail2ban
 
-**ID** `fail2ban` · security · depends: ssh, firewall
+**ID** `fail2ban` · security · depends: ssh
 
 **Applies:** an SSH server was detected, or the ssh step is ticked (it installs one, D45), because the only jail is `sshd`. Otherwise "not applicable: no SSH server installed, and the SSH step is off".
 
 **Facts used** (fail2ban 1.1.0-8):
 - **Debian defaults:** `jail.d/defaults-debian.conf` sets `banaction = nftables`, `banaction_allports = nftables[type=allports]`, and `[sshd] enabled = true`, `backend = systemd`, `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`.
 - **Read order** (later wins): `jail.conf` → `jail.d/*.conf` → `jail.local` → `jail.d/*.local`, alphabetically.
-- **nftables action:** uses its own `table inet f2b-table` (input hook, priority −1). That makes it independent of firewalld, and it survives firewalld reloads.
+- **nftables action:** uses its own `table inet f2b-table` (input hook, priority −1), so it works with no firewall set up. `nftables` has priority "important", so every trixie install has `nft`; fail2ban also recommends it.
 
 **Actions:** install `fail2ban python3-systemd`, then write `/etc/fail2ban/jail.d/50-kiln.local`:
 ```
 [DEFAULT]
-ignoreip = 127.0.0.1/8 ::1 <LAN subnets>
+ignoreip = 127.0.0.1/8 ::1 <LAN subnets detected at run time>
 bantime = 1h
 bantime.increment = true
 maxretry = 5
@@ -679,7 +643,7 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
 
 ## 17. docker
 
-**ID** `docker` · apps · depends: apt-sources, firewall
+**ID** `docker` · apps · depends: apt-sources
 
 **Actions** (Docker's Debian install docs, current release 29.9.3):
 1. Remove the conflicting packages if present: `docker.io docker-compose docker-doc docker-buildx podman-docker containerd runc`.
@@ -696,7 +660,6 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
 
 **Notes:**
 - "log out and back in for docker group membership";
-- "`-p` published ports bypass host firewall zones, so bind private services to 127.0.0.1";
 - "the docker group is root-equivalent";
 - "existing containers keep their old log settings".
 
@@ -704,7 +667,7 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
 
 ## 18. cockpit
 
-**ID** `cockpit` · apps · depends: apt-sources, firewall, network-migration (soft: works without it, but the networking page needs NM)
+**ID** `cockpit` · apps · depends: apt-sources, network-migration (soft: works without it, but the networking page needs NM)
 
 **Actions:**
 - Install `cockpit`. With backports on, use `apt-get install -t trixie-backports cockpit` (371). The `(>= source:Version)` dependencies pull the matching 371 binaries from backports. Without backports, install from main (337).
@@ -717,41 +680,14 @@ Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status ss
 
 **Notes:**
 - `https://<lan-ip>:9090`;
-- who it's open to (the `kiln-lan` subnets, or "closed: use localhost or an SSH tunnel");
+- that it listens on port 9090 on every network the machine is connected to (no firewall, D50);
 - login uses the target user's password. On a fresh install the postinst writes `root` into `/etc/cockpit/disallowed-users`.
 
 ---
 
 ## 19. remote-desktop
 
-**ID** `remote-desktop` · apps · depends: firewall
-
-**Applies:** GNOME detected. Otherwise "not applicable: no GNOME desktop installed".
-
-**Purpose:** RDP at the login screen (GNOME Remote Desktop "system" mode), reachable from the LAN only.
-
-**How grdctl is run** (verified against `src/grd-ctl.c` in gnome-remote-desktop 48.1-4):
-- `grdctl --system ...` as root re-executes itself through `pkexec --user gnome-remote-desktop` with no prompt, because polkit always authorizes uid 0.
-- That path has two problems: it needs the separate `pkexec` package, and it **always exits 0** even when the inner command fails.
-- grdctl also enters system mode by itself whenever its euid is the `gnome-remote-desktop` user.
-
-So kiln runs every grdctl command **as the daemon user, without `--system`**, which gives real exit codes:
-
-`runuser -u gnome-remote-desktop -- env -i HOME=/var/lib/gnome-remote-desktop PATH=/usr/bin:/bin grdctl rdp …`, with cwd set to that home.
-
-**Actions:**
-1. Install `gnome-remote-desktop polkitd`. `rdp enable` starts the unit through `/usr/libexec/gnome-remote-desktop-enable-service`, which does a polkit check, and gnome-remote-desktop doesn't depend on polkitd. The `gnome-remote-desktop` system user and its home (`/var/lib/gnome-remote-desktop`, 0700) are created by the package's sysusers/tmpfiles.
-2. TLS, as the daemon user:
-   - `mkdir -p /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop`;
-   - `openssl req -x509 -newkey rsa:4096 -noenc -days 3650 -subj /CN=<hostname> -keyout …/tls.key -out …/tls.crt`. openssl's default is 30 days, and it prompts for a subject without `-subj`. `-nodes` is deprecated, so use `-noenc`.
-   - Key mode 0600. Skip this sub-step if both files exist and the cert expires in more than 30 days.
-3. `grdctl rdp set-tls-key /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop/tls.key`, then `grdctl rdp set-tls-cert …/tls.crt`. Paths must be absolute.
-4. `grdctl rdp set-credentials <rdp user>`, with **only** `<password>\n` on stdin. Don't send the user name and password together on stdin: each prompt opens a new buffered reader on fd 0, so the first prompt can swallow both lines, and the second then crashes on EOF. The password never appears in argv or logs.
-5. `grdctl rdp enable`, which enables and starts `gnome-remote-desktop.service`. Then `systemctl enable --now gnome-remote-desktop.service` (a harmless no-op that makes the state explicit). The unit ships disabled because `debian/rules` uses `dh_installsystemd --no-enable`.
-
-The password comes from the wizard: masked, with a confirm field, or "generate one" (shown once, stored in `/etc/kiln/secrets/rdp`, and shown again by `kiln secrets show rdp`). Port 3389. LAN-only via the firewall's `kiln-lan` zone (firewalld's `rdp` service is tcp/3389).
-
-**Check** (same runuser form): `grdctl status` shows RDP `enabled` and both TLS paths, and lists Username/Password as `(hidden)` (so they are set). `systemctl is-enabled gnome-remote-desktop.service` succeeds. The password itself can't be read back, so kiln compares a hash marker it keeps next to the secret file.
+**Removed (D50).** kiln doesn't set up remote desktop.
 
 ---
 

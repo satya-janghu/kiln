@@ -32,7 +32,7 @@ func (Step) Category() string { return "apps" }
 
 // DependsOn lists hard dependencies only; network-migration is soft (the
 // networking page needs NetworkManager, but Cockpit works without it).
-func (Step) DependsOn() []string { return []string{"apt-sources", "firewall"} }
+func (Step) DependsOn() []string { return []string{"apt-sources"} }
 
 func (Step) Packages() []step.PackageRef {
 	return []step.PackageRef{
@@ -122,11 +122,7 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		ip = "<lan-ip>"
 	}
 	env.Notes.Add("Cockpit: https://%s:9090", ip)
-	if lan := env.Facts.LANStrings(); len(lan) > 0 {
-		env.Notes.Add("Cockpit is open to the LAN only (firewall zone kiln-lan: %s).", strings.Join(lan, ", "))
-	} else {
-		env.Notes.Add("Cockpit's port is closed: no LAN subnet was found. Use https://localhost:9090 or an SSH tunnel.")
-	}
+	env.Notes.Add("Cockpit listens on port 9090 on every network this machine is connected to; kiln doesn't set up a firewall (D50).")
 	env.Notes.Add("Log in to Cockpit with %s's password. root is blocked (/etc/cockpit/disallowed-users).", env.User().Name)
 	return acts, nil
 }

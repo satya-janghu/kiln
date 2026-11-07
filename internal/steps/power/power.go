@@ -32,7 +32,6 @@ const (
 	ppd      = "power-profiles-daemon"
 	tuned    = "tuned"
 	tunedPPD = "tuned-ppd"
-	tlp      = "tlp"
 )
 
 // sleepTargets are masked so logind reports CanSuspend and friends as "na".
@@ -429,10 +428,6 @@ func managerActions(ctx context.Context, env *step.Env) []action.Action {
 	s := env.Sys
 	var acts []action.Action
 	mgr := Manager(env.Facts, env.Opts.String("power_manager"))
-	if apt.Installed(ctx, s, tlp) {
-		env.Notes.Warn("TLP is installed. kiln never uses TLP alongside %s; it will be stopped.", mgr)
-		acts = append(acts, action.Systemctl{Verb: "stop", Units: []string{"tlp.service"}})
-	}
 	switch mgr {
 	case ppd:
 		if apt.Installed(ctx, s, tuned) || apt.Installed(ctx, s, tunedPPD) {

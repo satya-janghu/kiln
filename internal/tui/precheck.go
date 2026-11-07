@@ -107,7 +107,7 @@ func (m *model) onTaskDone(msg taskDoneMsg) tea.Cmd {
 			ps.result = []string{
 				"!! The revert didn't finish: " + errText,
 				"",
-				"The backups are under /var/lib/kiln/backup and the details are in /var/log/kiln.log. You can continue, but check the network (or SSH or firewall) settings first.",
+				"The backups are under /var/lib/kiln/backup and the details are in /var/log/kiln.log. You can continue, but check the network or SSH settings first.",
 			}
 			ps.notes = append(ps.notes, "Reverting the unfinished change from last time failed; see /var/log/kiln.log.")
 		}

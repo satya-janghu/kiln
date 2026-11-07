@@ -43,7 +43,7 @@ func New() step.Step { return Step{} }
 func (Step) ID() string          { return "docker" }
 func (Step) Title() string       { return "Docker Engine" }
 func (Step) Category() string    { return "apps" }
-func (Step) DependsOn() []string { return []string{"apt-sources", "firewall"} }
+func (Step) DependsOn() []string { return []string{"apt-sources"} }
 
 func (Step) Packages() []step.PackageRef {
 	out := make([]step.PackageRef, 0, len(packages))
@@ -256,7 +256,6 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 	}})
 
 	env.Notes.Add("Log out and back in for %s's docker group membership to take effect.", u.Name)
-	env.Notes.Add("Docker `-p` published ports bypass the host firewall zones; bind private services to 127.0.0.1 (e.g. -p 127.0.0.1:8080:80).")
 	env.Notes.Add("The docker group is root-equivalent: anyone in it can control the whole machine.")
 	env.Notes.Add("Existing containers keep their old log settings; the %s × %s rotation applies to new containers.", want["max-size"], want["max-file"])
 	return acts, nil
