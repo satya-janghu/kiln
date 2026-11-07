@@ -453,23 +453,27 @@ Earlier the same day you also decided D50–D52 (no firewall, remote desktop, ne
 
 **Shape:** Go, one static binary, the same one-liner install. Three screens: a checklist, progress with live output, and a summary. The only choices are the step checkboxes; every value below is fixed. GNOME-only items appear only when GNOME is detected. Nothing is saved, nothing keeps running, and kiln leaves nothing of its own behind except one log of the run (`/var/log/kiln.log`). If a run fails halfway, running it again is safe, because apt installs and file writes are naturally repeatable. There is no special machinery for that.
 
-**Keep (the job):**
-1. sudo for your user, passwordless.
-2. apt sources in deb822: main, contrib, non-free, non-free-firmware, security, updates, backports.
-3. Full upgrade.
-4. Firmware and CPU microcode for the detected hardware.
-5. System: zram swap, a 500M journal cap, raised inotify limits, timesyncd. The hostname and timezone stay as the installer set them.
-6. SSH: install the server, allow password logins for your user and root, and give root your user's password if root has none. Port 22, MaxAuthTries 4. `sshd -t` runs before the reload.
-7. fail2ban for SSH (1 h ban, increasing, 5 tries).
-8. Automatic updates: every package, every 12 h, never an automatic reboot (D40).
-9. Always on: no sleep, lid ignored; GNOME's no-suspend settings locked.
-10. Power profile balanced: power-profiles-daemon with GNOME, tuned without.
-11. Battery stop at 80%: one plain udev rule where the kernel offers `charge_control_end_threshold`; otherwise a note.
-12. Docker, with log rotation of 10 MB × 3.
-13. Cockpit.
-14. Dev tools: gh (GitHub's repo), node through nvm, the Python venv with uv, Playwright Chromium, ruff, pre-commit and httpie, and Go (latest) with its tools.
-15. GNOME only: codecs, VA-API, Flathub, Google Chrome.
-16. NVIDIA, picked automatically by GPU: Turing or newer gets NVIDIA's repo, Maxwell to Ada gets Debian's 550, and anything older stays on nouveau. With Secure Boot, MOK enrollment is queued and its password is shown once on the last screen.
+**Always done, no checkbox:** a safety check that refuses unless the machine runs Debian 13 amd64 and kiln is started as root, then waits for first-boot automatic updates to finish. Then the package sources in deb822 (main, contrib, non-free, non-free-firmware, security, updates, backports), a full upgrade, and the firmware and CPU microcode for the detected hardware.
+
+**Checkboxes, all ticked by default** (revised 2026-11-08 to be one per thing the owner might want or not):
+1. Passwordless sudo for your user, working without logging out.
+2. System basics: zram swap, a 500 MB journal cap, raised inotify limits, time sync.
+3. SSH: install and start the server; password logins for your user and root; root gets your password if it has none.
+4. fail2ban: 1 h ban, increasing on repeats, after 5 failed SSH logins.
+5. Automatic updates: every package from every source, every 12 h, never an automatic reboot.
+6. Always on: no sleep, the lid ignored, GNOME's sleep settings set to never.
+7. Balanced power profile: tuned without GNOME, power-profiles-daemon with it.
+8. Battery limit at 80% (only when a battery supports it): one udev rule.
+9. Docker: from Docker's repo, your user in the docker group, logs at 10 MB × 3.
+10. Cockpit: web admin on port 9090. It pulls in NetworkManager, PackageKit and udisks2.
+11. Command-line tools: gh (GitHub's repo), git, build-essential, vim and neovim, tmux, htop and btop, ripgrep, fzf and about 20 more.
+12. Node.js: nvm and Node 26 for your user.
+13. Python: dev packages, uv, a venv at `~/.venvs/automation` with scraping and automation libraries, Playwright Chromium, ruff, pre-commit and httpie.
+14. Go: latest from go.dev, plus gopls, dlv, staticcheck and govulncheck.
+15. Codecs and video acceleration (GNOME only).
+16. Flathub in GNOME Software (GNOME only).
+17. Google Chrome (GNOME only).
+18. NVIDIA driver (only with an NVIDIA GPU): NVIDIA's for Turing and newer, Debian's 550 for Maxwell to Ada; older cards stay on nouveau. MOK enrollment is queued with Secure Boot.
 
 **Drop:**
 - mirror benchmarking (use deb.debian.org, Debian's CDN);
