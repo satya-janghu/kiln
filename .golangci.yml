@@ -1,0 +1,32 @@
+# golangci-lint v2. Static analysis is kiln's only mechanical check (decision D34).
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # "standard" = errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - bodyclose     # unclosed HTTP response bodies (mirrors, downloads)
+    - errorlint     # errors.Is/As instead of == and type assertions
+    - gosec         # command injection, file permissions, weak randomness
+    - misspell
+    - nilerr        # returning nil after checking err != nil
+    - noctx         # HTTP requests without a context (every network call needs a timeout)
+    - unconvert
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # struct layout noise; readability wins here
+    errcheck:
+      check-type-assertions: true
+    gosec:
+      config:
+        G306: "0644" # managed config files are world-readable by design; secrets use 0600 explicitly
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

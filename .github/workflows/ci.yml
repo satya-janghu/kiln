@@ -1,0 +1,40 @@
+# Static checks on every push. There are no tests by design (docs/review-process.md, D30/D34).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Build (linux/amd64 static binary)
+        run: make build
+
+      - name: Build for darwin (development platform must compile)
+        run: GOOS=darwin GOARCH=arm64 go build ./...
+
+      - name: go vet (linux and darwin)
+        run: |
+          go vet ./...
+          GOOS=darwin GOARCH=arm64 go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+      - name: shellcheck install.sh
+        run: if [ -f install.sh ]; then shellcheck install.sh; else echo "install.sh not present yet"; fi
