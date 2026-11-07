@@ -1,14 +1,13 @@
-// Package cli defines kiln's command-line interface.
-//
-// The command tree matches docs/product-spec.md. Commands whose behavior has not
-// been built yet return an error naming the milestone that delivers them
-// (docs/roadmap.md), so nothing ever pretends to have done work.
+// Package cli defines kiln's command-line interface (docs/product-spec.md).
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -25,32 +24,23 @@ func Execute(info BuildInfo) int {
 }
 
 func run(info BuildInfo, args []string, stdout, stderr io.Writer) int {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
 	root := newRootCmd(info)
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	if err := root.Execute(); err != nil {
-		// Errors are printed once, here, so every failure looks the same.
-		// If stderr itself can't be written there is nowhere left to report that,
-		// and the non-zero exit code still signals the failure.
+	if err := root.ExecuteContext(ctx); err != nil {
+		// If stderr itself can't be written there is nowhere left to report that;
+		// the non-zero exit code still signals the failure.
 		_, _ = fmt.Fprintf(stderr, "kiln: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-// wizardFlags are shared by `kiln` and `kiln wizard`, which are the same command.
-type wizardFlags struct {
-	freshMachine bool
-}
-
-func addWizardFlags(cmd *cobra.Command, f *wizardFlags) {
-	cmd.Flags().BoolVar(&f.freshMachine, "i-know-this-is-a-fresh-machine", false,
-		"allow applying changes even though /etc/kiln/allow-apply does not exist")
-}
-
 func newRootCmd(info BuildInfo) *cobra.Command {
-	var wf wizardFlags
+	var force bool
 	root := &cobra.Command{
 		Use:   "kiln",
 		Short: "Set up a freshly installed Debian 13 machine",
@@ -58,33 +48,22 @@ func newRootCmd(info BuildInfo) *cobra.Command {
 			"Run it at the machine's console. With no subcommand it starts the setup wizard.",
 		Version:       fmt.Sprintf("%s (commit %s)", info.Version, info.Commit),
 		Args:          cobra.NoArgs,
-		SilenceUsage:  true, // a runtime error is not a usage error; don't dump help
-		SilenceErrors: true, // run() prints the error
-		RunE:          notImplemented("M2"),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          func(cmd *cobra.Command, _ []string) error { return runWizard(cmd.Context(), info, force) },
 	}
-	addWizardFlags(root, &wf)
-	// Keep the command surface exactly as documented in docs/product-spec.md.
+	root.Flags().BoolVar(&force, "i-know-this-is-a-fresh-machine", false,
+		"allow applying changes even though /etc/kiln/allow-apply does not exist")
 	root.CompletionOptions.DisableDefaultCmd = true
-
 	root.AddCommand(
-		newWizardCmd(),
-		newPlanCmd(),
-		newFactsCmd(),
-		newBatteryCmd(),
-		newThermalCmd(),
-		newKernelCmd(),
-		newMirrorsCmd(),
-		newSecretsCmd(),
-		newCatalogCmd(),
+		newWizardCmd(info),
+		newPlanCmd(info),
+		newFactsCmd(info),
+		newBatteryCmd(info),
+		newThermalCmd(info),
+		newMirrorsCmd(info),
+		newSecretsCmd(info),
+		newCatalogCmd(info),
 	)
 	return root
-}
-
-// notImplemented returns a RunE that fails with a plain-language message naming
-// the milestone (docs/roadmap.md) that will deliver the command.
-func notImplemented(milestone string) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, _ []string) error {
-		return fmt.Errorf("%q is not built yet; it arrives in milestone %s (see docs/roadmap.md)",
-			cmd.CommandPath(), milestone)
-	}
 }

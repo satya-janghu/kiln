@@ -1,0 +1,37 @@
+# GoReleaser v2 config. Spec: docs/distribution.md, D14 (checksums.txt), D15 (repo).
+# Validate locally with `make release-check`. Releases are cut only after review sign-off.
+version: 2
+
+project_name: kiln
+
+builds:
+  - id: kiln
+    main: ./cmd/kiln
+    binary: kiln
+    goos: [linux]
+    goarch: [amd64]
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+
+archives:
+  - id: kiln
+    ids: [kiln]
+    formats: [tar.gz]
+    # Fixed name (no version) so releases/latest/download/ URLs keep working.
+    name_template: kiln_linux_amd64
+    # The binary only, as `kiln` at the archive root (install.sh extracts that member).
+    files:
+      - none*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: satya-janghu
+    name: kiln

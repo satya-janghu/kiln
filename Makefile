@@ -13,11 +13,12 @@ build:
 
 ## lint: vet + golangci-lint for both darwin (dev) and linux (target, so *_linux.go is checked) + shellcheck
 lint:
+	go mod tidy -diff
 	go vet ./...
 	GOOS=linux GOARCH=amd64 go vet ./...
 	golangci-lint run ./...
 	GOOS=linux GOARCH=amd64 golangci-lint run ./...
-	@if [ -f install.sh ]; then shellcheck install.sh; else echo "install.sh not present yet (milestone M4); skipping shellcheck"; fi
+	shellcheck install.sh
 
 ## vuln: known-vulnerability scan of code and dependencies
 vuln:
@@ -25,7 +26,7 @@ vuln:
 
 ## release-check: validate the GoReleaser config
 release-check:
-	@if [ -f .goreleaser.yaml ]; then goreleaser check; else echo ".goreleaser.yaml not present yet (milestone M4); skipping"; fi
+	goreleaser check
 
 tidy:
 	go mod tidy

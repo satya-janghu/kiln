@@ -4,7 +4,13 @@
 
 Steps run in the order listed. Every step and sub-option defaults to **on** in the wizard (options are in [options-reference.md](options-reference.md)). "(verify)" marks a fact not yet confirmed against a current primary source. Code may not rely on it until [debian13-notes.md](debian13-notes.md) marks it **V** (see [review-process.md](review-process.md)).
 
-**The Debian installer owns the desktop (GNOME or none), the SSH server and blends.** kiln never installs or removes them. It detects them in `preflight`, and steps that depend on them are "not applicable" when they're absent. "GNOME detected" means `gnome-shell` and `gdm3` are installed. "SSH server detected" means `openssh-server` is installed.
+**The Debian installer owns the desktop (GNOME or none), the SSH server and blends.** kiln never installs or removes them. It detects them in `preflight`, and steps that depend on them are "not applicable" when they're absent. Verified against tasksel 3.81 and blendsel 0.10:
+- **"GNOME detected"** means `gnome-shell` and `gdm3` are installed. `task-gnome-desktop` → `gnome-core` pulls in both.
+- **"SSH server detected"** means `openssh-server` is installed. `task-ssh-server` depends on it.
+- **"Standard system utilities"** is not a package: it's every Priority: standard package.
+- **Blends** are the `task-*-blend` packages (astro, med, junior-desktop, science, freedombox, hamradio). Debian Edu isn't offered by the installer.
+
+kiln must not depend on any Priority: standard package being present (`pciutils`, `wget`, `ca-certificates`, …). Without the "standard" task those packages are missing, so `preflight` installs what kiln itself needs.
 
 Two steps aren't in the original brief's list: `kernel` (5b), split out so it can be toggled on its own (D13), and `network-migration` (6, D4). The old `desktop` step was removed (D29).
 
@@ -22,31 +28,43 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
 
 **Purpose:** make sure it's safe and possible to continue, and gather Facts.
 
-**Actions (read-only, except the inhibitor):**
-- Root check. If not root, stop with "Run with sudo, or as root via `su -`". If started via plain `su` (PATH lacks `/usr/sbin`), prepend `/usr/local/sbin:/usr/sbin:/sbin` to kiln's own PATH and note it.
-- OS check: `/etc/os-release` `ID=debian` and `VERSION_ID="13"`, and `dpkg --print-architecture` = `amd64`. Anything else stops the run.
-- Virtualization: `systemd-detect-virt`. A VM gets a warning only. A container stops the run ("kiln sets up real machines, not containers").
-- Interrupted change: if `state.json` has a `pending` entry, the wizard's revert prompt runs before anything else (see architecture).
-- Internet: HTTPS HEAD to `deb.debian.org` and `github.com` (5 s timeout each), plus a DNS check. Failure stops the run, with what to check (cable, Wi-Fi, DNS).
+**Actions (read-only, except the inhibitor and kiln's own prerequisites):**
+- **Root check.** If not root, stop with "Run with sudo, or as root via `su -`". If started via plain `su`, PATH lacks `/usr/sbin`: Debian's `login.defs` has no `ALWAYS_SET_PATH`, so plain `su` keeps the caller's PATH. In that case prepend `/usr/local/sbin:/usr/sbin:/sbin` to kiln's own PATH and note it.
+- **OS check.** Parse `/etc/os-release` (a symlink to `/usr/lib/os-release`) per os-release(5), stripping quotes. Require `ID=debian`, `VERSION_ID=13` and `dpkg --print-architecture` = `amd64`. Anything else stops the run.
+- **Virtualization.** If `systemd-detect-virt --container` exits 0, stop ("kiln sets up real machines, not containers"). If `systemd-detect-virt --vm` exits 0, show a warning only.
+- **Single instance.** Take the exclusive lock `/run/kiln/kiln.lock`. If another kiln holds it: "kiln is already running (pid N)", and offer the log read-only.
+- **Repair, before the internet check** (architecture: "Interrupted runs and the next start"):
+  1. the `pending` revert prompt;
+  2. a run record left unfinished → "The last run stopped during <step>";
+  3. interrupted dpkg (`dpkg --audit` output, or `/var/lib/dpkg/updates/` entries) → `dpkg --configure -a` + `apt-get -f install -y`;
+  4. stale runtime masks and leftover `.kiln-new`/`.kiln-old` directories are cleaned up.
+- **Power.** On battery, warn. Below 30% and not on AC, ask for confirmation before continuing.
+- **Internet.** HTTPS HEAD to `deb.debian.org` and `github.com` (5 s timeout each), plus a DNS check. Report the failure precisely:
+  - DNS failure → "check the network / DNS";
+  - TLS verification failure → "install ca-certificates", not "no network";
+  - timeout → "check the cable or Wi-Fi".
+- **kiln's own prerequisites**. `ca-certificates` and `pciutils` are Priority standard and may be missing, so install them (through the apt helper) if absent.
 - **Installer choices:**
-  - GNOME detected (`gnome-shell` + `gdm3` installed; also report `task-gnome-desktop`);
-  - SSH server detected (`openssh-server` installed and `ssh.service` enabled);
-  - installed `task-*` packages and any Debian blend (`education-*`, `med-*`, etc.), reported for information only;
+  - GNOME detected (`gnome-shell` + `gdm3` installed);
+  - SSH server detected (`openssh-server` installed, `ssh.service` enabled);
+  - installed `task-*` packages and any `task-*-blend` package, reported for information only;
+  - whether the "standard" task is installed (`tasksel --list-tasks` marks it with `i`; tasksel may itself be absent);
   - the default systemd target.
 - **Hardware facts:**
   - DMI vendor, product, family and chassis type;
-  - CPU vendor, model and cores, and RAM;
-  - GPUs (lspci classes 0300/0302/0380, vendor IDs 1002/10de/8086);
-  - Wi-Fi chip (PCI/USB IDs and driver);
-  - Secure Boot (`mokutil --sb-state`, or the EFI variable);
-  - batteries (`/sys/class/power_supply/*` with type=Battery and scope≠Device) and the AC adapter;
+  - CPU vendor, model and cores; RAM;
+  - GPUs, read from `/sys/bus/pci/devices/*/{class,vendor}` (classes 0x0300/0x0302/0x0380; vendors 0x1002/0x10de/0x8086), so this doesn't depend on lspci;
+  - the Wi-Fi chip (PCI/USB IDs and driver);
+  - Secure Boot: the efivar `SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c`, byte 5 = 1. `mokutil --sb-state` is optional, because mokutil exists only when shim-signed is installed. No efivars means BIOS boot and "Secure Boot: n/a".
+  - batteries (`/sys/class/power_supply/*` with type=Battery and scope≠Device), and the AC adapter;
   - `platform_profile` and its choices, amd-pstate status, and whether thinkpad_acpi or hp-wmi is present.
-- **Network facts:**
-  - NICs, physical vs virtual;
-  - IPv4/IPv6 addresses, LAN subnets and the default route;
-  - whether each NIC is managed by ifupdown, NetworkManager, systemd-networkd or nothing.
-- **Session:** the target user, and whether kiln runs inside an SSH session (`SSH_CONNECTION`). An SSH session gets a warning only.
-- Start the sleep inhibitor for the whole run.
+- **Network facts:** NICs (physical vs virtual), IPv4/IPv6 addresses, LAN subnets, the default route, and whether each NIC is managed by ifupdown, NetworkManager, systemd-networkd or nothing.
+- **Session:** the target user, and whether kiln runs inside an SSH session (`SSH_CONNECTION`), which only produces a warning.
+- **Inhibitor.** Start `systemd-inhibit --what=sleep:idle:handle-lid-switch:handle-power-key:shutdown --mode=block --who=kiln --why="installing packages; rebooting now could break the system" sleep infinity` for the whole run.
+  - `handle-lid-switch` is needed because logind's `LidSwitchIgnoreInhibited=yes` default would otherwise let a lid close suspend the machine.
+  - `shutdown` in block mode refuses every logind reboot or poweroff, root's included. Escapes: `systemctl reboot -i`, `--force`, or holding the power button.
+- **Quiet other package managers** for the whole run, just before the first apt action: stop and wait for, then runtime-mask, `apt-daily*.timer`/`.service` and `packagekit.service`. Undone in the end-of-run restore (architecture: "Nothing else changes packages during a run").
+- **Own scope.** When applying starts, kiln re-executes itself in `systemd-run --scope` (system slice), so closing the terminal or ending the desktop session can't kill it mid-dpkg.
 
 **Check:** n/a (always runs). **Failure** stops the run (the only step that does).
 
@@ -58,17 +76,21 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
 
 **Purpose:** give the target user passwordless sudo.
 
-**Options:** `sudo.nopasswd`.
+**Options:** passwordless sudo (on).
 
 **Actions:**
-1. Install `sudo` if missing. Verified: debian-installer installs sudo and adds the first user to `sudo` only when the root password is left empty. With a root password, the user isn't in the group, and sudo is usually absent.
-2. `UserAddGroup(user, sudo)` (via `adduser <user> sudo` or `usermod -aG sudo`).
-3. File name: `/etc/sudoers.d/90-<sanitized>-nopasswd`. sudoers.d skips names that contain `.` or end in `~`. Sanitize to `[a-z0-9_-]` and replace other characters with `_`.
-4. Content `<user> ALL=(ALL:ALL) NOPASSWD: ALL`. Write it to a temp file, validate with `visudo -cf <tmp>`, then install it 0440 root:root through the managed writer. Never install a file that fails validation.
+1. Install `sudo` if missing. Verified in user-setup 1.107: debian-installer installs sudo and runs `adduser <user> sudo` only when the root password is left empty (`passwd/root-login=false`). With a root password set, the user isn't in the group, and sudo is usually absent.
+2. `adduser <user> sudo` (adduser 3.152: two arguments add an existing user to an existing group; a no-op if already a member).
+3. File name: `/etc/sudoers.d/90-<sanitized>-nopasswd`. sudoers(5) (sudo 1.9.16) skips files whose names end in `~` or contain a `.`. Sanitize to `[a-z0-9_-]`, replacing anything else with `_`.
+4. Content: `<user> ALL=(ALL:ALL) NOPASSWD: ALL`. Debian's `/etc/sudoers` ends with `@includedir /etc/sudoers.d`, after `%sudo ALL=(ALL:ALL) ALL`, so this later rule wins.
+   - Write it to a temp file and validate with `visudo -cf <tmp>`.
+   - Install it 0440 root:root through the managed writer.
+   - Then run `visudo -c` to check the **whole** policy, including ownership and modes. visudo(8) says checking a single include file isn't sufficient. If that fails, delete the file and fail the step.
+   - Never leave an invalid file in place.
 
-**Check:** sudo installed, user in group `sudo`, and the file exists with identical content and mode 0440.
+**Check:** sudo is installed, the user is in group `sudo`, the file exists with identical content and mode 0440, and `visudo -c` passes.
 
-**Gotchas:** group membership only takes effect at the next login, so note "log out and back in". Keep this file even when SSH goes key-only. This plus password SSH on the internet is exactly the risk the ssh step warns about.
+**Gotchas:** group membership takes effect at the next login, so the summary notes "log out and back in". Passwordless sudo plus password SSH on the internet is exactly the risk the ssh step warns about.
 
 ---
 
@@ -76,25 +98,32 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
 
 **ID** `apt-sources` · base · depends: preflight
 
-**Purpose:** deb822 sources with the right components, with no cdrom entries, and with backports.
+**Purpose:** deb822 sources with the right components, no cdrom entries, and backports.
 
-**Options:** `apt.components`, `apt.backports`.
+**Options:** trixie-backports (on).
 
-**Actions:**
-1. If `/etc/apt/sources.list` or `sources.list.d/*.list` has active lines: run `apt modernize-sources` (APT 3.0.x, verified from source). It converts them to `.sources` (main-file entries go to `sources.list.d/<origin>.sources` or `moved-from-main.sources`) and renames the originals to `*.list.bak`. It needs a "yes" answer, so feed `y` on stdin (answering N makes it a dry run). It keeps only the `signed-by`/`trusted` options. If it fails, convert in Go.
-2. Disable any `cdrom:` entry (`deb cdrom:` in `.list` files, `URIs: cdrom:` in `.sources`) by commenting out the line or setting `Enabled: no`.
-3. Write `/etc/apt/sources.list.d/debian.sources` with three stanzas:
-   - `Types: deb`, `URIs: http://deb.debian.org/debian`, `Suites: trixie trixie-updates`, `Components: main contrib non-free non-free-firmware`, `Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp` (the release notes say `.pgp`; the `.gpg` symlink will go away).
-   - Security: `URIs: http://security.debian.org/debian-security`, `Suites: trixie-security`, same components and keyring.
-   - Backports (if enabled): `URIs: http://deb.debian.org/debian`, `Suites: trixie-backports`, same components. Backports have a low default pin, so nothing comes from them unless a step asks.
-   
+**What the installer leaves** (apt-setup 0.198): a **one-line `/etc/apt/sources.list`**, not deb822. It has `deb` **and active `deb-src`** lines for `http://deb.debian.org/debian` (trixie, trixie-updates) and `http://security.debian.org/debian-security trixie-security`, with components `main non-free-firmware`. Since 0.195, cdrom lines are commented out unless the medium was a real CD.
+
+**Actions** (apt 3.0.3):
+1. Comment out any active `deb cdrom:` line, and set `Enabled: no` on any `.sources` stanza with a `cdrom:` URI. This comes first: bracketed cdrom labels contain spaces, which would break deb822 `URIs:` during conversion.
+2. `sources.list`: if it has active lines, comment every one out, under the header `# Debian entries now live in sources.list.d/debian.sources (managed by kiln)`. The original is backed up first. kiln writes the Debian entries itself instead of converting them, which also drops d-i's `deb-src` lines (not needed).
+3. Other active `sources.list.d/*.list` files (third-party): `apt -y modernize-sources`. It converts each `X.list` to `X.sources` and renames the original to `X.list.bak`; main-file entries would be appended to `<origin>.sources`. After it runs, any output file with an empty `Signed-By:` fails the step, because modernize leaves Signed-By empty with a warning when the Release file isn't cached. Using `-y` (`APT::Get::Assume-Yes`) avoids depending on stdin answers.
+4. Write `/etc/apt/sources.list.d/debian.sources` (managed, so it replaces anything modernize appended for `Origin: Debian`) with these stanzas:
+   - `Types: deb`, `URIs: http://deb.debian.org/debian`, `Suites: trixie trixie-updates`, `Components: main contrib non-free non-free-firmware`, `Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp` (the `.pgp` path from the release notes, §4.3).
+   - Security: `URIs: http://security.debian.org/debian-security`, `Suites: trixie-security`, with the same components and keyring.
+   - Backports (if enabled): `URIs: http://deb.debian.org/debian`, `Suites: trixie-backports`, with the same components. Backports' Release has `NotAutomatic: yes` / `ButAutomaticUpgrades: yes`, so nothing comes from it unless a step asks with `-t trixie-backports`.
+
    The `mirrors` step later changes only the first and third `URIs:` lines.
-4. Disable duplicates in other `.sources` files that cover the same suites, such as `moved-from-main.sources` or `debian.sources` from modernize-sources (set `Enabled: no` or remove it after a backup), so apt doesn't warn about duplicate targets. kiln's `debian.sources` is the one owner of Debian archive entries.
-5. `AptUpdate`.
+5. Set `Enabled: no` on any other `.sources` stanza that targets the same suites. A stanza counts as the same only when its URI is exactly the Debian archive (`http(s)://deb.debian.org/debian[/]`, `security.debian.org/debian-security`) or kiln's mirror list; `debian-debug` and others are left alone. Duplicates only cause a warning ("Target … is configured multiple times"), but kiln's `debian.sources` is the one owner of Debian entries.
+6. `AptUpdate`.
 
-**Check:** `debian.sources` parses to the wanted stanzas (URIs may be the mirror+file form), there are no active cdrom entries, there are no duplicate trixie entries, and `sources.list` has no active lines.
+All of this runs under a `revert` snapshot of `sources.list` and `sources.list.d/`. If anything fails, including `apt update`, the snapshot is restored (D44).
 
-**Gotchas:** deb-src isn't needed. The `.kiln-bak` backup of the original `sources.list` is kept. `apt update` failing after this step → restore the backups and fail with the apt error text.
+**Check:** `debian.sources` parses to the wanted stanzas (URIs may be the `mirror+file:` form), there are no active cdrom entries, no other stanza targets the Debian suites, and `sources.list` has no active lines.
+
+**Gotchas:**
+- Backups live in `/var/lib/kiln/backup/…`, never next to the file. A `*.kiln-bak` inside `sources.list.d/` makes apt print "Ignoring file … invalid filename extension" on every run.
+- If `apt update` fails after this step, restore the backups and fail with the apt error text.
 
 ---
 
@@ -104,20 +133,37 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
 
 **Purpose:** fastest download **throughput** (not latency), with automatic failover.
 
-**Options:** `mirrors.*`. Subcommands: `kiln mirrors bench [--apply]`, `kiln mirrors reset`.
+**Options:** see options-reference. Subcommands: `kiln mirrors bench [--apply]`, `kiln mirrors reset`.
 
 **Actions:**
-1. Candidates: parse the Debian mirror masterlist (`https://mirror-master.debian.org/status/Mirrors.masterlist`, verified: about 370 RFC822-style stanzas separated by blank lines, with `Site:`, `Country:` (e.g. `DE Germany`), `Type:`, `Archive-architecture:`, `Archive-http:` (path such as `/debian/`) and more). Keep mirrors that carry amd64 over HTTP/HTTPS. Pick mirrors in the configured country (plus neighbors), add `worldwide_sample` random others, and add `deb.debian.org`. `country: auto` maps the configured timezone (`system.timezone`, else `/etc/timezone` / `timedatectl`) to a country code via the zone1970.tab table compiled into kiln (Asia/Kolkata → IN). Neighbors come from a small built-in region table. kiln never calls a geo-IP service (decision D21). Unknown timezone → worldwide sample + deb.debian.org only.
-2. Freshness: fetch each candidate's `dists/trixie/InRelease` and parse `Date:`. Drop any mirror older than deb.debian.org's. Secondary signal: `<archive>/project/trace/master`, whose first line is a date followed by `Archive serial:` and `Date:`.
-3. Throughput: test **sequentially**. `GET dists/trixie/main/Contents-amd64.gz` with `Range: bytes=0-<test_bytes>` and a `test_timeout` cap. Score is bytes/s, and the first 0.5 s is ignored as TCP warm-up. A mirror with an error or a short read gets score 0.
-4. Write `/etc/apt/mirrors/debian.list` with the top `mirrors.top` mirrors, one URI per line, each followed by a **TAB** and `priority:N` (1 = best; apt tries lower numbers first). Add `http://deb.debian.org/debian<TAB>priority:99` last. Lines without priority are tried last in random order, so always set one. `#` comments are allowed (header goes there). Format verified in trixie's `apt-transport-mirror(1)`.
-5. Change `debian.sources` URIs for main + backports to `mirror+file:/etc/apt/mirrors/debian.list`. Leave security alone.
-6. Drop-in `/etc/apt/apt.conf.d/80kiln-acquire`: `Acquire::Retries "5";` (exists in apt.conf(5), with `::Delay` sub-options). Leave `Acquire::Queue-Mode` at its default (`host`, one queue per host, which is what spreads load across mirrors). Leave `Acquire::http::Pipeline-Depth` (documented in apt-transport-http(1), default 10) alone.
-7. Verify: `apt update`. On failure, restore the previous `debian.sources` and fail with "Mirrors couldn't be used, kept deb.debian.org".
+1. **Candidates.** Parse the Debian mirror masterlist at `https://mirror-master.debian.org/status/Mirrors.masterlist` (about 370 RFC822 stanzas with `Site:`, `Country:` (e.g. `DE Germany`), `Archive-architecture:`, `Archive-http:` (a path such as `/debian/`)). Select:
+   - mirrors whose `Archive-architecture` includes `amd64` and that have `Archive-http`. Their URL is `http://<Site><Archive-http>`; the masterlist advertises no HTTPS.
+   - mirrors in the configured country plus its neighbors;
+   - `worldwide_sample` random others;
+   - `deb.debian.org`.
 
-**Check:** the mirrorlist exists, is younger than 30 days, all its mirrors are fresh, and the sources point at it. (Re-benchmarking is not part of Check; use `kiln mirrors bench --apply` manually.)
+   `country: auto` maps the configured timezone (`system.timezone`, else `timedatectl show -p Timezone`) to a country code via the zone1970.tab table compiled into kiln (Asia/Kolkata → IN). Neighbors come from a small built-in region table. kiln never calls a geo-IP service (D21). An unknown timezone means worldwide sample + deb.debian.org only.
+2. **Freshness.** For each candidate, fetch `dists/trixie/InRelease` and `dists/trixie-updates/InRelease` (and `trixie-backports` if enabled), and parse `Date:` and `Valid-Until:`. Drop a mirror if:
+   - its trixie `Date:` differs from deb.debian.org's (it's missing a point release; trixie only changes at point releases);
+   - its trixie-updates or trixie-backports `Date:` is more than 12 h older than deb.debian.org's (those change on every push);
+   - or any `Valid-Until` has passed.
+3. **Throughput,** tested **sequentially** so tests don't compete for bandwidth.
+   - The test file is taken from the signed trixie InRelease: `main/Contents-all.gz`, about 38 MB. `main/Contents-amd64.gz` is only ~12.7 MB, too small for a 40 MB range.
+   - `GET` with `Range: bytes=0-<min(test_bytes, size)-1>`, stopping at `test_timeout`. Reaching the timeout is normal.
+   - Score = bytes received after the first 0.5 s ÷ the time after the first 0.5 s, which skips TCP slow start.
+   - Score 0 only on an HTTP error, a status other than 206/200, or less than 1 MB received.
+4. **Mirrorlist.** Write `/etc/apt/mirrors/debian.list`. Format verified in apt-transport-mirror(1) and `methods/mirror.cc` (apt 3.0.3): one URI per line, a **TAB**, then `key:value` tags; `#` comments allowed.
+   - The top `mirrors.top` mirrors all get the **same** `priority:1`. apt sorts by priority and picks **randomly per file among equal priorities**, with failover on error. That's what spreads downloads across hosts. Distinct priorities 1..N would send everything to mirror #1.
+   - `http://deb.debian.org/debian<TAB>priority:99` goes last, as the fallback.
+5. **Sources.** Change the `debian.sources` URIs for main and backports to `mirror+file:/etc/apt/mirrors/debian.list`. `mirror+scheme` URIs are documented in sources.list(5) and work alongside `Signed-By`. Security stays as it is, because `security.debian.org` isn't mirrored.
+6. **Retries.** Drop-in `/etc/apt/apt.conf.d/80kiln-acquire` with `Acquire::Retries "5";` (apt.conf(5); the default is 3). `Acquire::Queue-Mode` (default `host`) and `Acquire::http::Pipeline-Depth` (apt-transport-http(1), default 10) are left alone.
+7. **Verify.** `apt update`. On failure, restore the previous `debian.sources` **and the previous mirror list** (or remove a new one), and fail with "Mirrors couldn't be used, kept the previous sources".
 
-**Gotchas:** apt spreads downloads across the listed mirrors, so listing several gives parallel bandwidth. Rejected: netselect-apt (ranks by latency), apt-fast/aria2 (extra deps, bypasses apt's verification flow, and the mirror method already parallelizes across hosts).
+**Check:** the mirrorlist exists, is less than 30 days old, every listed mirror still passes the freshness rule, and the sources point at it. Re-benchmarking isn't part of Check; use `kiln mirrors bench --apply`.
+
+**Gotchas:** listing several equal-priority mirrors gives parallel bandwidth across hosts, and deb.debian.org (Fastly) often wins the bench on its own. Rejected alternatives:
+- netselect-apt: ranks by latency, not throughput;
+- apt-fast/aria2: extra dependencies, and it wraps apt.
 
 ---
 
@@ -125,9 +171,12 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
 
 **ID** `upgrade` · base · depends: apt-sources
 
-**Actions:** `AptUpdate`, then `apt-get full-upgrade -y` (with the apt helper options). Before and after, compare `/boot/vmlinuz-*` and the running kernel (`uname -r`). If a newer kernel is installed or `/run/reboot-required` exists → `RebootNeeded("new kernel <ver>")`.
+**Actions:** `AptUpdate`, then `apt-get full-upgrade -y` (with the apt helper options). Before and after, simulate with `LC_ALL=C apt-get -s full-upgrade`. `apt-get` keeps the classic output (`Inst`/`Remv` lines are untranslated, and the summary line is translated, so it's never parsed). A reboot reason is added if any of these is true:
+- the simulation listed `Inst linux-image-`;
+- the running kernel's build (`uname -v`, "Debian <ver>") differs from `dpkg-query -W -f '${Version}' linux-image-$(uname -r)`, which catches same-ABI rebuilds;
+- `/run/reboot-required` exists. In Debian, only unattended-upgrades' kernel postinst hook writes it, and that package isn't installed until step 20, so this check is only a fallback.
 
-**Check:** `apt-get -s full-upgrade` shows 0 upgraded, 0 newly installed and 0 to remove (after an update within this run).
+**Check:** `LC_ALL=C apt-get -s full-upgrade` prints no `Inst`/`Remv` lines (after an update in this run).
 
 ---
 
@@ -137,11 +186,17 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
 
 **Applies:** always (containers are refused in preflight).
 
-**Actions:** install
-- `amd64-microcode` if the CPU vendor is AMD, `intel-microcode` if Intel;
-- `firmware-amd-graphics` if there's an AMD GPU; `firmware-misc-nonfree` always (covers many devices, including NVIDIA GSP and Intel bits);
-- `firmware-realtek` if any Realtek NIC/Wi-Fi/Bluetooth;
-- Wi-Fi by driver/vendor: Intel `iwlwifi` → `firmware-iwlwifi`; Qualcomm Atheros `ath*` → `firmware-atheros`; MediaTek `mt7*` → `firmware-mediatek`; Broadcom `brcmfmac` → `firmware-brcm80211`. All of these are in non-free-firmware.
+**Actions:** install (all in **non-free-firmware**; firmware-nonfree 20250410 in trixie):
+- CPU microcode: `amd64-microcode` if the CPU vendor is AMD, `intel-microcode` if Intel.
+- `firmware-misc-nonfree`, with `--no-install-recommends`. Its Recommends pull in GPU and other firmware the machine may not have. It does **not** contain Intel iGPU, NVIDIA or MediaTek firmware; trixie splits those into separate packages.
+- By detection:
+  - `firmware-amd-graphics` for an AMD GPU (both target laptops);
+  - `firmware-intel-graphics` and `firmware-intel-misc` for Intel graphics;
+  - `firmware-nvidia-graphics` for an NVIDIA GPU (nouveau firmware; the proprietary driver's `firmware-nvidia-gsp` comes in via `nvidia-kernel-dkms` in multimedia);
+  - `firmware-realtek` for any Realtek NIC, Wi-Fi or Bluetooth device.
+- Wi-Fi, by driver: Intel `iwlwifi` → `firmware-iwlwifi`; Qualcomm Atheros `ath*` → `firmware-atheros`; MediaTek `mt7*` → `firmware-mediatek`; Broadcom `brcmfmac` → `firmware-brcm80211`.
+- After installing, run `update-initramfs -u -k all`. The firmware triggers rebuild only the newest image's initramfs, so the stable fallback kernel would otherwise boot without the new firmware.
+- Then report anything still missing using `isenkram-autoinstall-firmware -l` (from `isenkram-cli`, **list-only**). kiln never runs isenkram in install mode, because it writes one-line `.list` sources that clash with kiln's deb822 and mirror setup. Missing firmware becomes a summary note.
 
 Reboot note if microcode changed.
 
@@ -151,19 +206,31 @@ Reboot note if microcode changed.
 
 ## 5b. kernel
 
-**ID** `kernel` · hardware · depends: apt-sources, firmware-packages · option `kernel.backports`
+**ID** `kernel` · hardware · depends: apt-sources, firmware-packages · options: backports kernel (**off**), backports firmware
 
-**Applies:** backports enabled. Otherwise "not applicable: backports disabled".
+**Applies:** only when you select "backports kernel" for this machine (D38).
+- **By default,** every machine runs Debian's stock trixie kernel: `linux-image-amd64` from trixie, 6.12 LTS. The Debian installer installs it, and the `upgrade` step and unattended-upgrades keep it on the latest version like any other package.
+- **Not selected:** "skipped (by you)".
+- **Backports disabled:** "not applicable: backports disabled".
 
-**Purpose:** a newer kernel for newer laptops, with the stable 6.12 LTS kernel kept as a boot fallback.
+**Kernel policy** (D38): kiln never pins, holds or marks any kernel manual. Kernels follow the `linux-image-amd64` metapackage from whichever suite is in use, and update to the latest version through normal upgrades. Old kernels are cleaned up by Debian's normal autoremove protection, which keeps the running kernel and the newest ones.
 
-**Actions:** `AptInstall{linux-image-amd64, Suite: trixie-backports}` (7.2.x in backports today, versus 6.12.x in trixie), plus `linux-headers-amd64` from backports when an NVIDIA GPU is present (DKMS). Also install the matching `firmware-*` packages from backports if the kernel needs newer firmware (verify whether that's needed). The versioned stable `linux-image-6.12.*` package stays installed, so GRUB keeps it as an entry. Mark it manually installed (`apt-mark manual`) so `autoremove` never removes it. Reboot note: "new kernel <ver>".
+**Package facts** (2026-11-07):
+- `linux-image-amd64` is 6.12.x in trixie/trixie-security and 7.2.x in trixie-backports. Both are built from `linux-signed-amd64`, so both are signed for Secure Boot.
+- The backports image depends on `linux-base (>= 4.17~)`, which only exists in backports, so `-t trixie-backports` is required.
 
-**Stable fallback tracking** (`kernel.track_stable_fallback`, default on, decision D17): the newest `linux-image-6.12.*-amd64` (and its headers when NVIDIA is present) available from `trixie`/`trixie-security` is installed and marked manual. Older stable 6.12 images are left for `apt autoremove` once they're no longer the newest two. unattended-upgrades won't install new **package names** (an ABI bump is a new name), so kiln installs `kiln-kernel-fallback.timer` (weekly, after `apt-daily-upgrade.service`), which runs `kiln kernel fallback` and does the same. Reboot note only when the backports kernel changes, not when the fallback does.
+**Actions (only when selected):**
+1. `apt-get install -t trixie-backports linux-image-amd64`, plus `linux-headers-amd64` from backports when an NVIDIA GPU is present (DKMS).
+2. Backports firmware (option, on): reinstall the `firmware-*` packages chosen in step 5 with `-t trixie-backports`, because backports carries newer firmware (20260916). Then run `update-initramfs -u -k all`.
+3. Reboot note: "new kernel <ver>".
 
-**Check:** a backports `linux-image-*` is installed, the newest stable-suite `linux-image-6.12.*-amd64` is installed and marked manual, and the timer is enabled.
+After that, the backports metapackage brings each newer backports kernel. The `autoupdates` step upgrades packages from every repository (D40), so those kernel updates also arrive automatically.
 
-**Gotchas:** once the `linux-image-amd64` metapackage comes from backports, it tracks backports. New stable-suite kernel ABI versions then stop arriving automatically, so the fallback kernel slowly ages. Backports kernels do get security fixes, but with less guarantee. kiln handles this with the stable fallback tracking above.
+**Check:** a backports `linux-image-amd64` is installed.
+
+**Gotchas:**
+- Once the metapackage comes from backports, nothing depends on the stable 6.12 image any more. Debian's normal autoremove will eventually remove it once newer kernels arrive, which this policy accepts. To switch back to stable, install `linux-image-amd64` from trixie by hand.
+- **NVIDIA:** NVIDIA's open modules (the "NVIDIA latest" source) support Linux ≥ 4.15, so both kernels are fine. Debian's 550 builds for the stock 6.12 kernel, but its newest backports build documents fixes only up to Linux 6.17. So if you select the backports kernel on a machine using "Debian stock" NVIDIA, the review screen warns that the driver may not build for 7.2.
 
 ---
 
@@ -173,39 +240,105 @@ Reboot note if microcode changed.
 
 **Purpose:** make NetworkManager the only network owner, so Cockpit's networking page works and nothing fights over interfaces.
 
-**Applies:** at least one physical interface is configured in `/etc/network/interfaces` (or `interfaces.d`). Otherwise "not applicable: NetworkManager already manages networking". On GNOME installs this is expected to be not applicable, because the installer hands networking to NetworkManager when the desktop task brings it in (verify the debian-installer netcfg behavior). In practice this step matters on machines installed without a desktop.
+**Applies:** at least one physical interface is configured in `/etc/network/interfaces` (or a file under `interfaces.d`).
+- **Otherwise:** "not applicable: NetworkManager already manages networking".
+- **GNOME installs:** this is the expected result there. Verified in netcfg 1.197 (`finish-install.d/55netcfg-copy-config`): when network-manager is installed in the target, the installer copies its connections to `/etc/NetworkManager/system-connections/` (0600) and writes only `lo` to `interfaces`. So in practice the step matters on machines installed without a desktop.
+- **Not applicable (manual):** if any stanza uses features kiln won't translate:
+  - `bridge_*`, `bond-*` or `vlan` options;
+  - `source`/`source-directory` beyond the default `interfaces.d`;
+  - `mapping` stanzas;
+  - `pre-up`/`up`/`post-up`/`down` hooks.
+
+  The reason names the line to migrate by hand.
 
 **Options:** move interfaces to NetworkManager (on), include Wi-Fi (on).
 
-**Actions (one interface at a time):**
+**Facts used** (ifupdown 0.8.44, dhcpcd 10.1.0, network-manager 1.52.1):
+- **Which DHCP client ifupdown runs:** it prefers `dhclient` if installed, then `udhcpc`, then `dhcpcd`. Fresh trixie installs have `dhcpcd-base`.
+- **dhcpcd's client ID:** DUID-based (RFC 4361). The shipped `dhcpcd.conf` enables `duid`, which is stored as colon-hex text in `/var/lib/dhcpcd/duid`. The client ID on the wire is `ff` + IAID (last 4 bytes of the MAC) + DUID.
+- **dhclient's client ID:** built the same way. Its DUID is in `default-duid` in `/var/lib/dhcp/dhclient6.<if>.leases`.
+- **What NM can send:** a hex `ipv4.dhcp-client-id` is sent byte for byte. NM's own `duid` mode hashes `/etc/machine-id`, so it does **not** match.
+
+**Actions (one interface at a time; Wi-Fi last):**
 1. Install `network-manager` if it's missing.
-2. Read the current config from `interfaces` plus the live `ip -j addr` / `ip -j route` and `/etc/resolv.conf`: DHCP or static (address, gateway, DNS), plus the MAC.
-3. Create the NM profile `kiln-<iface>` with `nmcli connection add type ethernet ifname <iface> ...`, matching the live config exactly, with `autoconnect yes`, and not yet activated. For DHCP, read the client ID the current client used (trixie's ifupdown uses `dhcpcd-base` on new installs, older ones `isc-dhcp-client`, so read whichever lease file exists) and set `ipv4.dhcp-client-id` to match, so the router hands back the same address (which matters later for port forwarding). If it can't be determined, use `mac` and note that the IP may change.
-4. Wi-Fi stanzas (`wpa-ssid`/`wpa-psk`, or `wpa-conf` pointing to a wpa_supplicant file), when "include Wi-Fi" is on: an NM `wifi` profile with the same SSID and PSK (`802-11-wireless-security.psk`, stored root-only by NM). If the PSK can't be read, that interface stays on ifupdown with a note.
-5. Record `pending` in `state.json`, with the `interfaces` backup and the profile name.
-6. Comment out that interface's stanzas in `interfaces` (keep `lo`), then `ifdown <iface>` → `nmcli device set <iface> managed yes` → `nmcli connection up kiln-<iface>`.
-7. Check locally: the link is up, it has an address, the default route is present, DNS resolves, and HTTPS to `deb.debian.org` works (30 s budget).
-   - If the check passes, clear `pending`. If the address changed, show the new IP on the run screen and in the summary.
-   - If the check fails, revert: restore `interfaces`, delete `kiln-<iface>`, run `nmcli device set <iface> managed no` and `ifup <iface>`, clear `pending`, and record `failed`.
-8. Disable `networking.service` only after every interface has been migrated.
+2. Read the current config from the stanzas (`auto`/`allow-hotplug`, `inet dhcp|static`, `inet6 auto|dhcp|static`, `wpa-ssid`/`wpa-psk`/`wpa-conf`) together with live `ip -j addr` / `ip -j route` and `/etc/resolv.conf`.
+3. Build the NM profile `kiln-<iface>` as a **keyfile**: `/etc/NetworkManager/system-connections/kiln-<iface>.nmconnection`, written 0600 root via the managed writer. NM ignores keyfiles readable by anyone else. Using a file keeps a Wi-Fi PSK out of the process list, where it would be visible on an `nmcli` command line. The profile includes:
+   - `interface-name`, `autoconnect=false` until the check passes (see 4 and 7);
+   - IPv4: `method=manual` with address, gateway and DNS for static, or `method=auto` for DHCP;
+   - for DHCP, `dhcp-client-id=ff:<IAID>:<DUID>` built from the facts above. Any `clientid`/`iaid` line in `dhcpcd.conf` is honoured. If the DUID can't be read, use `mac` and note that the IP may change.
+   - IPv6: `method=auto` for `inet6 auto`, `dhcp`, `manual` or `ignore` to match the stanza. Also `addr-gen-mode=eui64`, so the SLAAC address stays the same as under ifupdown (NM's default is stable-privacy), and `dhcp-duid=<DUID>` for DHCPv6.
+   - Wi-Fi: `[wifi] ssid=…`, `[wifi-security] key-mgmt=wpa-psk`, `psk=…` (8–63 characters or 64 hex digits). If the PSK can't be read, that interface stays on ifupdown with a note (only when "include Wi-Fi" is on; otherwise Wi-Fi is left alone).
+4. `nmcli connection load <file>`. The profile is written with `autoconnect=false`, so NM can't start it on its own the moment the device becomes managed. `nmcli connection up` on a profile that's already activating **tears that activation down and restarts it**, so an autoconnect race would mean two DHCP exchanges. The profile exists before the device becomes managed, which also stops NM creating its automatic "Wired connection" profile (NetworkManager.conf(5) `no-auto-default`; NM checks for a matching profile).
+5. Record `pending` in `state.json` with the backup and profile names. The `interfaces` backup keeps mode 0600 when it contains a `wpa-psk`.
+6. Switch in this order:
+   1. `ifdown <iface>`. This must run **while the stanza still exists**, or ifupdown treats the interface as unknown, skips its down commands, and leaves dhcpcd running alongside NM.
+   2. Comment out that interface's stanzas in `interfaces`. Keep `lo`, and keep the file mode.
+   3. `nmcli connection reload`, so the ifupdown plugin recomputes which interfaces are unmanaged.
+   4. Make sure no DHCP client is still running for the interface: `dhcpcd -k <iface>` / `dhclient -r <iface>` if a process remains after `ifdown`.
+   5. `nmcli device set <iface> managed yes`.
+   6. `nmcli --wait 90 connection up kiln-<iface>`, which waits for activation (90 s is nmcli's default for `up`).
+7. Check locally, polling for up to 60 s (D41 deadline): the link is up and has an address, the default route is present, DNS resolves, and HTTPS to `deb.debian.org` works.
+   - **If it passes,** run `nmcli connection modify kiln-<iface> connection.autoconnect yes` so it comes up at boot, then clear `pending`. If the address changed, show the new IP on the run screen and in the summary.
+   - **If it fails, revert:** `nmcli connection down kiln-<iface>`, delete the profile, `nmcli device set <iface> managed no`, `ip addr flush dev <iface>`, restore `interfaces`, `ifup <iface>`, clear `pending`, and record `failed`.
+8. Disable `networking.service` only if no non-`lo` stanza remains in `interfaces`.
 
-**Check:** no physical interfaces in `interfaces`, every physical NIC is managed by NM, and `networking.service` is disabled.
+**Check:** every stanza kiln migrated is gone, those interfaces are managed by NM with their `kiln-*` profile set to autoconnect (an unplugged cable still counts as done), and `networking.service` is disabled, or any stanza left behind is listed as an intentional exception (Wi-Fi without a readable PSK, or a manual-only stanza).
 
-**Gotchas:** later steps need the network, so a failed migration that couldn't be reverted stops the network-dependent steps (they're skipped as dependents), and the summary gives manual recovery instructions: restore `/etc/network/interfaces.kiln-bak` and run `systemctl restart networking`.
+**Gotchas:** later steps need the network. If a failed migration couldn't be reverted, the steps that need the network are skipped as dependents, and the summary gives manual recovery instructions: restore `/var/lib/kiln/backup/etc/network/interfaces` to `/etc/network/interfaces` and run `systemctl restart networking`.
 
 ---
 
 ## 7. multimedia
 
-**ID** `multimedia` · media · depends: apt-sources. The GStreamer parts apply only when GNOME is detected. The rest applies everywhere.
+**ID** `multimedia` · media · depends: apt-sources (the kernel step is optional; NVIDIA headers come from backports only when it's ticked, D43) The GStreamer parts apply only when GNOME is detected. The rest applies everywhere.
 
 **Actions:**
-- Codecs: `libavcodec-extra`, `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `gstreamer1.0-plugins-ugly`, `gstreamer1.0-libav`.
-- DVD: preseed `libdvd-pkg libdvd-pkg/first-install note` and `libdvd-pkg/post-invoke_hook-install boolean true` (verify the question names), install `libdvd-pkg`, then `dpkg-reconfigure -f noninteractive libdvd-pkg` to build libdvdcss.
-- VA-API: AMD → `mesa-va-drivers`, `vainfo`. Intel graphics → `intel-media-va-driver-non-free` (non-free, Gen8+), falling back to `intel-media-va-driver` (main) if non-free is disabled.
-- NVIDIA (`multimedia.nvidia`), only if an NVIDIA GPU is detected: install `linux-headers-amd64` (from the same suite as the target kernel) and `nvidia-driver` (550.x, **non-free**, DKMS). With Secure Boot **on**: DKMS signs with the MOK key in `/var/lib/dkms/mok.key` (verify). Run `mokutil --import` with a generated one-time password shown on screen, and add a summary note: "At next boot, choose *Enroll MOK* and enter <password>". Never disable Secure Boot. If enrollment can't be prepared, skip NVIDIA with a note instead of risking an unbootable GPU.
+- **Codecs:** `libavcodec-extra`, `gstreamer1.0-plugins-good`, `gstreamer1.0-plugins-bad`, `gstreamer1.0-plugins-ugly`, `gstreamer1.0-libav`.
+  - `libavcodec-extra61` `Conflicts`/`Provides: libavcodec61`, so apt swaps it in for `libavcodec61`. That's expected, and dependents stay satisfied through the Provides. The review screen lists the removal.
+- **DVD** (libdvd-pkg 1.4.3, contrib):
+  1. Preseed `libdvd-pkg libdvd-pkg/build boolean true` and `libdvd-pkg libdvd-pkg/post-invoke_hook-install boolean true`. `first-install` is only a `note`, so preseeding it does nothing.
+  2. Install `libdvd-pkg`. During the install the build is postponed, because dpkg holds the lock.
+  3. Run `dpkg-reconfigure -f noninteractive libdvd-pkg`. The DVD part runs after NVIDIA. If the build fails (for example, videolan.org is unreachable), that becomes a note and the rest of the step still counts as done (D44). That builds `libdvdcss2` from the videolan.org source tarball, using `build-essential` and `debhelper`.
+- **VA-API:**
+  - AMD → `mesa-va-drivers`, `vainfo`.
+  - Intel graphics (Gen8+) → `intel-media-va-driver-non-free` (non-free). It `Conflicts` with `intel-media-va-driver` (main), so only one of the two is ever installed; main is used if non-free is disabled. Pre-Gen8 Intel isn't covered, and that's noted.
+- **NVIDIA** (option on), only if an NVIDIA GPU is detected. The driver source is your choice per machine (D39):
+  - **Source choice.** "NVIDIA latest" uses NVIDIA's own repository and the newest branch (620.x today). It's the default when the GPU is **Turing or newer** (GTX 16xx / RTX 20xx and later; e.g. your RTX 2070 Super). The repository ships only NVIDIA's open kernel modules, which support "any Turing or later GPU" and Linux ≥ 4.15.
+  - **Debian stock.** "Debian stock" uses trixie's `nvidia-driver` 550.163 (non-free). It supports Maxwell, Pascal, Volta, Turing, Ampere and Ada/Hopper, but not Blackwell. Debian's wiki says the 550 series "is no longer maintained and contains several security issues"; the option form shows that sentence.
+  - **GPU generation.** For pre-Turing GPUs (e.g. your GTX 970, Maxwell), "Debian stock" is the only choice; "NVIDIA latest" is shown disabled with the reason. For Blackwell, only "NVIDIA latest" is offered. kiln decides the generation from the GPU's PCI device ID, matched against the compatible-GPU table in NVIDIA's open-gpu-kernel-modules README at the matching release tag. That table is compiled into kiln and refreshed with each kiln release.
+  - **Unticking.** Unticking the NVIDIA option leaves Debian's open `nouveau` driver in place, using `firmware-nvidia-graphics` from step 5.
+  1. **Secure Boot on** (`mokutil --sb-state`), for **both** sources: prepare signing **before** installing the driver. Both build the module with DKMS; NVIDIA's `nvidia-kernel-open-dkms` needs `dkms ≥ 3.1.8`, and trixie has 3.2.2.
+     - Install `mokutil openssl dkms`, then `dkms generate_mok`. This creates `/var/lib/dkms/mok.key` and `mok.pub` (DER, RSA-2048) if missing, and dkms signs modules with them.
+     - Check enrollment: if `mokutil --test-key /var/lib/dkms/mok.pub` says the key isn't enrolled or pending (in mokutil 0.7.2 it also checks MokNew):
+       - generate a one-time password, stored in `/etc/kiln/secrets/mok` (0600) and shown once on the summary screen, never in notes;
+       - run `mokutil --generate-hash` with the password on stdin (never in argv), writing the hash to `/root/.kiln-mok.hash` (0600);
+       - run `mokutil --import /var/lib/dkms/mok.pub --hash-file /root/.kiln-mok.hash`;
+       - delete the hash file;
+       - summary note: "At next boot choose *Enroll MOK* → *Continue* → enter the one-time password shown on the summary screen (also: sudo kiln secrets show mok)".
+     - If any of this fails, **skip NVIDIA** with a note. Never install a driver that can't load, and never disable Secure Boot.
+  2. Install `linux-headers-amd64` from the same suite as the kernel metapackage: trixie by default, backports only if you selected the backports kernel.
+  3. **"NVIDIA latest"** (verified 2026-11-07 against NVIDIA's driver installation guide for Debian 12/13 and the repository's own metadata):
+     1. **Repository**, in deb822 per your brief, not NVIDIA's one-line `.list`. NVIDIA publishes the signing key only inside its `cuda-keyring` package, so kiln:
+        - downloads `https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb`;
+        - verifies its sha256 is `d0d4ef986a44400f9db33c600ef33a985175e7cc63d805a10e1839c7a1e78f5f`;
+        - extracts `usr/share/keyrings/cuda-archive-keyring.gpg` with `dpkg-deb -x` into a temp dir, **without installing the package**;
+        - checks the key fingerprint is `02182E60104FCDC26EAE1B8597A5D4CB8793F200` ("Kitmaker (Debian 13 Trixie) <kitmaker@nvidia.com>");
+        - installs the key as `/etc/apt/keyrings/nvidia-cuda.gpg` (0644).
 
-**Check:** all the selected packages are installed and libdvdcss is present (`/usr/lib/x86_64-linux-gnu/libdvdcss.so.2`, verify).
+        A mismatch on either check fails the step with "NVIDIA's repository key changed; kiln needs an update".
+     2. Write `/etc/apt/sources.list.d/nvidia-cuda.sources`: `Types: deb`, `URIs: https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/`, `Suites: /` (a flat repository; deb822 then needs no `Components:`), `Architectures: amd64`, `Signed-By: /etc/apt/keyrings/nvidia-cuda.gpg`. Then `AptUpdate`. The repository's Release says `Origin: NVIDIA`, `Label: NVIDIA CUDA`.
+     3. **No branch pinning.** No `nvidia-driver-pinning-*` package, so apt follows NVIDIA's newest branch, which has been NVIDIA's default since 590.
+     4. Install the **desktop-only** set from NVIDIA's guide: `nvidia-driver nvidia-kernel-open-dkms`. That's the display driver with GL/Vulkan/VDPAU, the open DKMS module, and `firmware-nvidia-gsp`, with no CUDA libraries.
+        - NVIDIA's packages use the same names as Debian's, at higher versions (620 > 550), so apt picks NVIDIA's.
+        - The review screen lists them with their origin.
+  4. **"Debian stock":** install `nvidia-driver` from trixie (550.163, non-free, DKMS; `nvidia-kernel-dkms` pulls in `firmware-nvidia-gsp`). If NVIDIA's repository file exists from an earlier run, it's set to `Enabled: no` first, so apt doesn't pick 620.
+  5. **Switching sources:** going from "Debian stock" to "NVIDIA latest" is an ordinary upgrade. Going back is a downgrade, which kiln doesn't automate: the summary explains the manual steps (disable the NVIDIA source, then `apt install nvidia-driver=<550 version>` and its dependencies). This is a consequence of the shared package names, so it's flagged here rather than decided silently.
+
+**Check:**
+- the selected packages are installed;
+- `libdvdcss2` is installed (version `*~local`) and `/usr/lib/x86_64-linux-gnu/libdvdcss.so.2` exists;
+- with NVIDIA: the chosen source is in effect. For "NVIDIA latest": `nvidia-cuda.sources` and the key match, and `apt-cache policy nvidia-driver` shows the installed version from origin NVIDIA. For "Debian stock": the installed version is from trixie. In both cases `dkms status` shows the module built for the running kernel;
+- with NVIDIA and Secure Boot, the MOK is enrolled or pending (`--test-key` or `--list-new`).
 
 ---
 
@@ -214,10 +347,14 @@ Reboot note if microcode changed.
 **ID** `repos` · apps · depends: apt-sources
 
 **Actions:**
-1. Install `extrepo`. For each chosen extrepo repo (repos whose packages need a desktop, such as `google_chrome`, apply only when GNOME is detected), `extrepo enable <name>`. extrepo blocks non-free repos by default, so enable `contrib`/`non-free` policies in `/etc/extrepo/config.yaml` when a listed repo needs them (Chrome is non-free; verify). Then install the repo's package (e.g. `google-chrome-stable`).
-2. Flatpak (only when GNOME is detected; otherwise "not applicable: no GNOME desktop"): install `flatpak` and `gnome-software-plugin-flatpak`. Then `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo` (system-wide).
+1. Install `extrepo` (0.14). For each chosen extrepo repo (repos whose packages need a desktop, such as `google_chrome`, apply only when GNOME is detected):
+   1. Make sure the repo's policy is in `enabled_policies:` in `/etc/extrepo/config.yaml`. The default lists only `main`, with `contrib` and `non-free` commented out. `google_chrome` has policy `non-free`, so kiln adds `- non-free` (key-level edit, with backup). If the policy is missing, extrepo exits with "Please edit /etc/extrepo/config.yaml…".
+   2. Run `extrepo enable <name>` as root. It writes `/etc/apt/sources.list.d/extrepo_<name>.sources` with `Signed-By: /var/lib/extrepo/keys/<name>.asc`. A re-run only sets `Enabled: yes`, so it's idempotent.
+   3. Let extrepo's post-enable command finish. On first enable it waits through a 10 s countdown, then writes `/etc/default/google-chrome` with `repo_add_once="false"` and `repo_reenable_on_distupgrade="false"`. This stops Chrome's postinst from adding its own duplicate `google-chrome.list` with a conflicting Signed-By, so kiln must not interrupt it or close its stdin early.
+   4. `AptUpdate`, then install the repo's package (`google-chrome-stable`).
+2. Flatpak (only when GNOME is detected; otherwise "not applicable: no GNOME desktop"): install `flatpak` (1.16.x) and `gnome-software-plugin-flatpak` (48.x). Then run `flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`, the URL from Flathub's Debian setup page.
 
-**Check:** the extrepo sources exist and are enabled, the packages are installed, and `flatpak remotes --system` lists flathub.
+**Check:** `extrepo_<name>.sources` exists with `Enabled: yes`, the packages are installed, `/etc/default/google-chrome` has both keys, and `flatpak remotes --system` lists flathub.
 
 ---
 
@@ -225,9 +362,15 @@ Reboot note if microcode changed.
 
 **ID** `devtools` · dev · depends: apt-sources
 
-**Actions:** install `build-essential git git-lfs gh curl wget jq vim neovim tmux htop btop ripgrep fd-find fzf bat tree unzip zip rsync lsof strace bind9-dnsutils iproute2 traceroute mtr-tiny netcat-openbsd cmake ninja-build pkgconf libssl-dev shellcheck bash-completion man-db`. Use `pkgconf`: in trixie `pkg-config` is only a transitional package for it. All the others were verified in trixie main. `gh` is **not** taken from Debian (2.46 is old). With `devtools.gh_source: github` (default, decision D18), add the GitHub CLI repo first: keyring `https://cli.github.com/packages/githubcli-archive-keyring.gpg` → `/etc/apt/keyrings/githubcli-archive-keyring.gpg` (0644), and `/etc/apt/sources.list.d/github-cli.sources` with `URIs: https://cli.github.com/packages`, `Suites: stable`, `Components: main`, `Architectures: amd64`, `Signed-By:` that keyring (verify). Then install `gh` from it. With `debian`, use trixie's package. A missing package is logged and noted, not a step failure. As the user, create `~/.local/bin/fd → /usr/bin/fdfind` and `~/.local/bin/bat → /usr/bin/batcat`, and run `git lfs install --skip-repo` as the user.
+**Actions:**
+1. GitHub CLI repo (option `github`, default, D18): download `https://cli.github.com/packages/githubcli-archive-keyring.gpg` and verify its sha256 is `6084d5d7bd8e288441e0e94fc6275570895da18e6751f70f057485dc2d1a811b` (the value in GitHub's install doc on 2026-11-07; a mismatch fails the step, and the doc must be re-checked). Install it as `/etc/apt/keyrings/githubcli-archive-keyring.gpg` (0644). Write `/etc/apt/sources.list.d/github-cli.sources` with `Types: deb`, `URIs: https://cli.github.com/packages`, `Suites: stable`, `Components: main`, `Architectures: amd64`, and `Signed-By:` set to that keyring. This is the deb822 form of the official one-line source; the repo's Release file has Codename `stable` and Components `main`. Then `AptUpdate`. With option `debian`, use trixie's `gh` 2.46.
+2. Install `build-essential git git-lfs gh curl wget jq vim neovim tmux htop btop ripgrep fd-find fzf bat tree unzip zip rsync lsof strace bind9-dnsutils iproute2 traceroute mtr-tiny netcat-openbsd cmake ninja-build pkgconf libssl-dev shellcheck bash-completion man-db`. All of these are verified in trixie main. Use `pkgconf`, because `pkg-config` is a transitional package. Extra packages from the options are checked with `apt-cache policy` before the review screen. A missing package is noted, not a step failure.
+3. As the user (see the user-run rule in architecture.md):
+   - `mkdir -p <home>/.local/bin`;
+   - symlinks `<home>/.local/bin/fd → /usr/bin/fdfind` (fd-find 10.2.0) and `<home>/.local/bin/bat → /usr/bin/batcat` (bat 0.25.0), replaced only if they point elsewhere;
+   - `git lfs install --skip-repo`.
 
-**Check:** all available packages are installed and the symlinks point correctly.
+**Check:** all available packages are installed, the GitHub CLI source and keyring match, the symlinks point correctly, and `git config --global --get filter.lfs.process` is set.
 
 ---
 
@@ -235,57 +378,110 @@ Reboot note if microcode changed.
 
 **ID** `system` · base · depends: preflight
 
-**Actions:**
-- Hostname (if set): `hostnamectl set-hostname`, and update the `127.0.1.1` line in `/etc/hosts`.
-- Timezone (if set): `timedatectl set-timezone`.
-- Time sync: `systemd-timesyncd` (Debian's default; see decisions), enabled + `timedatectl set-ntp true`. With `chrony`, install chrony. Both `Provides/Conflicts/Replaces: time-daemon`, so apt removes timesyncd automatically.
-- journald: drop-in `/etc/systemd/journald.conf.d/50-kiln.conf` with `SystemMaxUse=500M`, then restart `systemd-journald`.
-- inotify: read the current `fs.inotify.max_user_watches` / `max_user_instances`, write `/etc/sysctl.d/60-kiln-inotify.conf` with max(current, configured), and `sysctl --system`. Never lower a value.
-- zram: `systemd-zram-generator` (see decisions). Debian's package already ships `/usr/lib/systemd/zram-generator.conf` enabling `[zram0]` at `min(ram / 2, 4096)`. kiln writes `/etc/systemd/zram-generator.conf` with `[zram0] zram-size = min(ram / 2, 4096)` and `compression-algorithm = zstd`, then runs `systemctl daemon-reload` + `systemctl restart systemd-zram-setup@zram0`. Done on all machines; the size scales with RAM, and it matters most on the 8 GB HP. Never install `zram-tools` alongside it, and remove it if present.
+**Actions** (systemd 257):
+- **Hostname** (if set and different): `hostnamectl set-hostname <name>`. Changing it under a running X11 session can stop new windows opening until you log out, because the X authority is tied to the hostname. The summary notes "log out and back in" when the hostname changed. hostnamectl never touches `/etc/hosts`, so kiln also rewrites the `127.0.1.1` line there (Debian Reference §5.1 convention). That's a key-level edit, with backup.
+- **Timezone** (if set): `timedatectl set-timezone <zone>`.
+- **Time sync:** `systemd-timesyncd` (Debian's default; D7), then `timedatectl set-ntp true`. With the `chrony` option, install chrony; both packages `Provides/Conflicts/Replaces: time-daemon`, so apt removes timesyncd.
+- **journald:** drop-in `/etc/systemd/journald.conf.d/60-kiln.conf` with `[Journal]` and `SystemMaxUse=500M`. journald.conf(5) recommends prefixes 60–90 for drop-ins in /etc. Then `systemctl restart systemd-journald`. The default cap is 10% of the filesystem, up to 4G.
+- **inotify:**
+  - Read the current `fs.inotify.max_user_watches` / `max_user_instances`. In 6.12, watches scale with RAM (1% of lowmem divided by the per-watch cost, clamped to 8192…1048576), roughly 60k on 8 GB. Instances is fixed at 128.
+  - Write `/etc/sysctl.d/60-kiln-inotify.conf` with max(current, configured), so a value is never lowered. No Debian package ships a sysctl.d file for these keys.
+  - Apply with `sysctl -q -p /etc/sysctl.d/60-kiln-inotify.conf`, not `--system`, so only kiln's file is re-applied.
+- **zram** (`systemd-zram-generator` 1.2.1; D8): Debian's `/usr/lib/systemd/zram-generator.conf` is just `[zram0]`, which uses the built-in default `zram-size = min(ram / 2, 4096)`.
+  - kiln writes the drop-in `/etc/systemd/zram-generator.conf.d/60-kiln.conf` with `[zram0]` and `compression-algorithm = zstd` (Debian's kernel has `CONFIG_ZRAM_BACKEND_ZSTD=y`). The size option only appears if the owner changes it.
+  - Then `systemctl daemon-reload`.
+  - If `dev-zram0.swap` is inactive, `systemctl start dev-zram0.swap`.
+  - If it's active and the config changed: restarting `systemd-zram-setup@zram0.service` also restarts the swap unit, which runs `swapoff`. That can fail or invoke the OOM killer when used swap exceeds available memory (likely on the 8 GB HP). So restart only when used swap is under 50% of MemAvailable; otherwise add the note "zram settings apply at the next boot".
+  - Never install `zram-tools` alongside it, and remove it if present.
 
-**Check:** each item matches the desired state.
+**Check:** the hostname, `/etc/hosts` line, timezone and NTP are as chosen; the journald and sysctl files match and the live sysctl values are ≥ the configured ones; the zram drop-in matches; and `/proc/swaps` lists `/dev/zram0`. A pending "next boot" note counts as done.
 
 ---
 
 ## 11. power
 
-**ID** `power` · power · depends: preflight · option `power.manager`
+**ID** `power` · power · depends: preflight · option: power manager
 
 **Applies:** always.
 
-**Actions:**
-- `systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target`.
-- logind drop-in `/etc/systemd/logind.conf.d/50-kiln-always-on.conf`: `HandleLidSwitch=ignore`, `HandleLidSwitchExternalPower=ignore`, `HandleLidSwitchDocked=ignore`, `HandleSuspendKey=ignore`, `HandleHibernateKey=ignore`, `IdleAction=ignore`. Then `systemctl reload systemd-logind` (restarting it kills desktop sessions; verify that reload is enough). The logind drop-in also applies on machines without a desktop, because the lid switch is handled by logind either way.
-- GNOME (only when GNOME is detected):
-  - User sessions: dconf system db. Debian ships **no** `/etc/dconf/profile/user` (verified), so create it with `user-db:user` and `system-db:local` (if one exists, add `system-db:local` only if it's missing). Write `/etc/dconf/db/local.d/50-kiln-power` with `[org/gnome/settings-daemon/plugins/power] sleep-inactive-ac-type='nothing'`, `sleep-inactive-battery-type='nothing'`, then `dconf update`. Screen blanking is left alone; only suspend matters. With `power.lock_gnome_settings` (default on, decision D23), also write `/etc/dconf/db/local.d/locks/50-kiln-power` listing `/org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-type` and `/org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-type`, so GNOME Settings can't turn automatic suspend back on.
-  - Greeter: `/etc/gdm3/greeter.dconf-defaults` (verified: ucf-managed, copied from `/usr/share/gdm/greeter.dconf-defaults`, three-way merged on upgrade, and symlinked into GDM's dconf db). kiln edits **only** the same two keys under `[org/gnome/settings-daemon/plugins/power]` in place (key-level edit with backup, not a whole-file rewrite, so ucf merges stay clean). Then `dpkg-reconfigure gdm3` or the README-documented gdm3 reload at next boot (never restart gdm3 mid-run, because it kills the session).
-- Power manager: with GNOME, `power-profiles-daemon` (pulled in by GNOME) set with `powerprofilesctl set performance`. Without GNOME: `tuned` with `tuned-adm profile throughput-performance`. Never both: if switching, stop, disable and remove the other. Never install TLP. If TLP is present, warn and stop it, since it conflicts.
+**Actions** (systemd 257, gnome-settings-daemon 48.1, gdm3 48.0, power-profiles-daemon 0.30, tuned 2.25.1):
+- **Sleep targets:** `systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target`. These are the exact unit names, and logind reports masked targets as "na" for CanSuspend and friends.
+- **logind:** drop-in `/etc/systemd/logind.conf.d/60-kiln-always-on.conf` with:
+  - `[Login]`;
+  - `HandleLidSwitch=ignore`, `HandleLidSwitchExternalPower=ignore`, `HandleLidSwitchDocked=ignore`;
+  - `HandleSuspendKey=ignore`, `HandleSuspendKeyLongPress=ignore` (its default is hibernate);
+  - `HandleHibernateKey=ignore`, `HandleHibernateKeyLongPress=ignore`;
+  - `IdleAction=ignore` (already the default, stated explicitly).
 
-**Check:** the targets are masked, the drop-in matches, the dconf keys are present, and the active profile is performance / throughput-performance.
+  `HandlePowerKey` is left at poweroff.
 
-**Gotchas:** power-profiles-daemon `Conflicts: tlp, laptop-mode-tools`, and `tuned-ppd` `Conflicts/Provides: power-profiles-daemon` (trixie control files). So "ppd" and "tuned + tuned-ppd" are mutually exclusive at the package level, but plain `tuned` + ppd aren't, and kiln must enforce the one-owner rule itself. ppd drives `platform_profile` and AMD EPP, so `thermal` defers to it. ppd's profile persists across reboots (state file under `/var/lib/power-profiles-daemon/`, verify).
+  Apply with `systemctl reload systemd-logind`. Verified: the unit is `Type=notify-reload`, SIGHUP re-reads the config, and the lid handler reads the setting at event time, so no restart is needed. This applies on machines without a desktop too.
+- **GNOME** (only when GNOME is detected):
+  - **User sessions:**
+    - Debian ships **no** `/etc/dconf/profile/user`, so kiln creates it with `user-db:user` and `system-db:local`. If one exists, it only adds `system-db:local` when that's missing.
+    - Write `/etc/dconf/db/local.d/60-kiln-power` with `[org/gnome/settings-daemon/plugins/power]` `sleep-inactive-ac-type='nothing'`, `sleep-inactive-battery-type='nothing'` and `power-button-action='interactive'`. The default for all three is `'suspend'`.
+    - With the lock option (on, D23), also write `/etc/dconf/db/local.d/locks/60-kiln-power` listing those three key paths.
+    - Then `dconf update`. Screen blanking is left alone.
+  - **Greeter:**
+    - `/etc/gdm3/greeter.dconf-defaults` is ucf-managed, and in Debian's version the power keys are **commented out**. kiln uncomments or inserts `sleep-inactive-ac-type='nothing'` and `sleep-inactive-battery-type='nothing'` under the `[org/gnome/settings-daemon/plugins/power]` header (key-level edit with backup).
+    - Then `systemctl reload gdm3`. `ExecReload=` runs `/usr/share/gdm/generate-config`, which rebuilds `/var/lib/gdm3/greeter-dconf-defaults`, followed by SIGHUP; gdm's SIGHUP handler only reloads settings, so sessions survive. `dpkg-reconfigure gdm3` does **not** do this.
+- **Power manager:**
+  - **With GNOME:** `power-profiles-daemon` (pulled in by GNOME), set with `powerprofilesctl set performance`. The choice persists in `/var/lib/power-profiles-daemon/state.ini`. ppd only offers `performance` when amd-pstate is in active (EPP) mode, or when `platform_profile_choices` lists both balanced and performance. If it isn't offered (possible on the 4500U with acpi-cpufreq), keep `balanced` and note it (fact R).
+  - **Without GNOME:** `tuned`, with a kiln profile `/etc/tuned/profiles/kiln-performance/tuned.conf` containing `[main] include=throughput-performance` and `[sysctl] vm.swappiness=60`. `throughput-performance` sets `vm.swappiness=10`, which works against zram, so kiln restores the kernel default. Then `tuned-adm profile kiln-performance`.
+  - **Never both.** If switching, stop, disable and remove the other. Never install TLP; if TLP is present, warn and stop it.
+
+**Check:** the targets are masked, the logind drop-in matches, the dconf keys and locks are present (GNOME), the greeter keys are uncommented, and the active profile is `performance` (or the noted fallback) / `kiln-performance`.
+
+**Gotchas:** power-profiles-daemon `Conflicts: tlp, laptop-mode-tools`, and `tuned-ppd` `Conflicts/Provides: power-profiles-daemon`. Plain `tuned` and ppd don't conflict at the package level, so kiln enforces the one-owner rule itself. ppd and tuned's throughput-performance (`[acpi] platform_profile=performance`, EPP performance) both drive the platform profile and AMD EPP themselves, so `thermal` only verifies.
 
 ---
 
 ## 12. thermal
 
-**ID** `thermal` · power · depends: power · helper `kiln thermal apply`
+**ID** `thermal` · power · depends: power · helper `kiln thermal apply` (boot-time thinkfan validation)
 
 **Applies:** each sub-part has its own applicability.
 
 **Actions:**
-- platform_profile: if `/sys/firmware/acpi/platform_profile_choices` contains `performance`, make sure it's set.
-  - **With power-profiles-daemon:** ppd 0.30 itself writes `/sys/firmware/acpi/platform_profile` (and adopts external writes as its own state). So kiln **never writes the sysfs file**. It sets `powerprofilesctl set performance` (persisted by ppd) and only verifies. `kiln-thermal.service` isn't installed.
-  - **With tuned (no GNOME):** check whether `throughput-performance` sets platform_profile (tuned's `[acpi] platform_profile` option, verify). If it does, kiln just verifies. If not, install `kiln-thermal.service` (oneshot, `After=tuned.service`, `ExecStart=/usr/local/bin/kiln thermal apply`), which writes `performance`.
-  - Kernel ≥ 6.14 also has `/sys/class/platform-profile/*`. The legacy file sets every handler, so keep using it.
-- AMD: ppd's amd-pstate driver (only when the status is `active`) sets EPP `performance`, governor `performance` and boost on under the performance profile. kiln reports the `amd_pstate/status` and per-CPU EPP, and notes it if they differ. Don't add kernel cmdline changes.
-- ThinkPad (vendor LENOVO and thinkpad_acpi loaded): if `/proc/acpi/ibm/fan` exists, write `/etc/modprobe.d/kiln-thinkpad.conf` with `options thinkpad_acpi fan_control=1`, install `thinkfan`, and write `/etc/thinkfan.yaml` with an aggressive curve: never level 0, ramps from 45 °C, level 7 by ~65 °C, `level full-speed` (or "disengaged") from 70 °C. Sensors come from hwmon (`k10temp` Tctl, `amdgpu` edge, `thinkpad` hwmon). Enable `thinkfan`. If the fan file or usable sensors are missing → skip with "not applicable: this ThinkPad doesn't expose fan control".
-- HP: there's no fan control from Linux. Rely on platform_profile, and note "check BIOS for *Fan Always On*".
-- Install `lm-sensors`, then `sensors-detect --auto`.
+- **platform_profile:** kiln **never writes** it. ppd 0.30 writes `/sys/firmware/acpi/platform_profile` (and adopts external writes), and tuned's `throughput-performance` sets `[acpi] platform_profile=performance`. kiln only verifies and reports:
+  - If `/sys/firmware/acpi/platform_profile_choices` contains `performance`, the current value should be `performance`.
+  - On kernel ≥ 6.14 (the backports kernel), the legacy file shows the **intersection** of all handlers' choices and reads `custom` when handlers disagree. `custom` is treated as "not performance", and the per-handler values from `/sys/class/platform-profile/*/profile` are reported.
+  - There is no `kiln-thermal.service`.
+- **AMD:** report `/sys/devices/system/cpu/amd_pstate/status` (active/passive/guided/disable) and the per-policy `energy_performance_preference`. Under the performance profile, ppd's amd-pstate driver sets the governor and EPP to `performance` and enables boost. A difference is a note. No kernel command-line changes. The default amd-pstate mode is fact R.
+- **ThinkPad** (vendor LENOVO and thinkpad_acpi loaded, and `/proc/acpi/ibm/fan` exists):
+  1. Write `/etc/modprobe.d/kiln-thinkpad.conf` with `options thinkpad_acpi fan_control=1`, then install `thinkfan` (1.3.1). Its unit ships disabled and reads `/etc/default/thinkfan` (`DAEMON_ARGS="-q"`).
+  2. Write `/etc/thinkfan.yaml`. thinkfan reads it before `/etc/thinkfan.conf`, and Debian ships neither. The curve keeps the fan on and ramps early:
+     ```yaml
+     sensors:
+       - hwmon: /sys/class/hwmon
+         name: k10temp
+         indices: [1]
+       - hwmon: /sys/class/hwmon
+         name: amdgpu
+         indices: [1]
+         optional: true
+     fans:
+       - tpacpi: /proc/acpi/ibm/fan
+     levels:
+       - [1, 0, 50]
+       - [3, 45, 58]
+       - [5, 55, 66]
+       - [7, 63, 80]
+       - ["level disengaged", 78, 32767]
+     ```
+     - The fan **never stops** (minimum level 1).
+     - It reaches the highest **in-spec** speed (level 7) from about 65–70 °C, which is the owner's "full speed from ~70 °C".
+     - `level disengaged` (out of spec, per thinkfan.conf(5)) is used only from 78 °C upward.
+     - The sensor list is built from what's detected (fact R).
+  3. **Validation:** thinkfan has **no config-test flag** (`-n` = foreground, `-c` = config file, `-D` = "DANGEROUS mode"), and it can't run until `fan_control=1` is active.
+     - **If** `/sys/module/thinkpad_acpi/parameters/fan_control` is already `Y`: stop `thinkfan` first if it's running (two instances would fight over the fan), then run `timeout 10 thinkfan -n -q -c /etc/thinkfan.yaml`. Exit 124 (still running when the timeout killed it) means the config is valid. Then enable and start `thinkfan`. Any other exit is a failure: write `level auto` to `/proc/acpi/ibm/fan` and leave thinkfan disabled.
+     - **Otherwise:** leave thinkfan disabled, add a reboot note, and install `kiln-thinkfan-enable.service`, a oneshot that runs `kiln thermal apply` at boot. That runs the same validation, then enables and starts thinkfan and disables itself.
+  4. thinkfan pings the fan watchdog itself.
+  - If the fan file or usable sensors are missing: "not applicable: this ThinkPad doesn't expose fan control".
+- **HP:** Linux can't drive the fans. Rely on the platform profile, and note "check the BIOS for *Fan Always On*".
+- **lm-sensors:** install `lm-sensors` only. Don't run `sensors-detect`: on these laptops k10temp, amdgpu, thinkpad and hp-wmi hwmon drivers load automatically, and its I2C/Super I/O probing adds risk for no gain.
 
-**Check:** the profile is performance, the unit and modprobe file are present, and thinkfan is active (when applicable).
-
-**Gotchas:** `fan_control=1` needs a module reload or reboot, so add a reboot note. Bad thinkfan configs make the service fail to start; validate with `thinkfan -n -c` (verify flag) before enabling.
+**Check:** the platform profile and AMD EPP are reported as notes (a machine whose firmware offers no `performance` profile is still done). On ThinkPads, the modprobe file and thinkfan config must match, and thinkfan must be active, or the boot-time enable service must be pending: enabled, `fan_control` not yet `Y`, and not `failed`. A failed boot helper reports "not done" with a `journalctl -b -u kiln-thinkfan-enable.service` hint.
 
 ---
 
@@ -295,15 +491,18 @@ Reboot note if microcode changed.
 
 **Applies:** at least one system battery (`type=Battery` and `scope` not `Device`). Otherwise "not applicable: no battery".
 
-**Goal:** keep the charge below 90%, preferring 80%. The ladder below stops at the first method that works. "Works" means the written value reads back as written.
+**Goal:** keep the charge below 90%, preferring 80%. The ladder below stops at the first method that works. "Works" means the value reads back as an acceptable value (< 90). A missing `scope` attribute counts as a system battery, because the ACPI battery driver doesn't expose it.
 
 ### Method ladder
 
 **Method 1: standard kernel thresholds** (`/sys/class/power_supply/BAT*/charge_control_end_threshold`, plus `charge_control_start_threshold` if present).
 - Stop candidates in order: `80, 85, 75, 70, 60, 50` (anything ≥ `battery.max_stop`, i.e. 90+, is never tried). Start = stop − `start_gap` (75 for 80).
-- Write order (thinkpad_acpi rejects start > current stop and stop < current start): when **lowering** (new stop < current start), write start first; when **raising**, write stop first. If a write fails with EINVAL, try the other order once before moving to the next candidate.
+- Write order. thinkpad_acpi rejects start > current stop and stop < current start with EINVAL; start == stop is allowed. When **lowering** (new stop < current start), write start first. When **raising**, write stop first. If a write fails, **or the read-back doesn't match**, retry once in the opposite order before moving to the next candidate.
+- Driver quirks:
+  - **dell-laptop:** silently **clamps** (start 50–95, end 55–100) and pushes the other value to keep a 5-point gap, instead of returning EINVAL. Accept whatever reads back if it's < 90.
+  - **asus-wmi:** the read-back is a value cached by the driver ("There isn't any method in the DSDT to read the threshold"), so the result is recorded as "set, not verifiable".
 - `charge_types` present (Dell ≥ 6.12, IdeaPad ≥ 6.17): Dell needs `Custom` written before the thresholds take effect, and verify it stuck. Writing `Long_Life` is a fixed-mode fallback (method 2) where that's the only choice.
-- Vendor ranges (TLP matrix, verified 2026-11 at linrunner.de/tlp/settings/bc-vendors.html): ThinkPad start 0–99 / stop 1–100. Dell start 50–95 / stop 55–100 with start ≤ stop−5 (a BIOS admin password blocks writes, so note it). ASUS is stop only, and some models accept only 40/60/80, which also reset at power-on (so the udev/boot re-apply matters). LG Gram accepts only 80/100. Huawei, System76 and Framework use full ranges. The kernel ABI says drivers may **round** to a supported value, so always compare the read-back to what was written and accept the rounded value only if it's still < 90.
+- Vendor ranges (TLP matrix, verified 2026-11 at linrunner.de/tlp/settings/bc-vendors.html): ThinkPad start 0–99 / stop 1–100. Dell start 50–95 / stop 55–100 with start ≤ stop−5 (a BIOS admin password blocks writes, so note it). ASUS is stop only, and some models accept only 40/60/80, which also reset at power-on (so the udev/boot re-apply matters). LG Gram accepts only 80/100. Huawei and System76 use full ranges. Framework works only through `cros_charge-control` with `probe_with_fwk_charge_control=1`. The kernel ABI says drivers may **round** to a supported value, so always compare the read-back to what was written and accept the rounded value only if it's still < 90.
 - Log every tried value and its result. Record the accepted pair.
 
 **Method 2: vendor fixed modes** (only if method 1 doesn't exist or doesn't work):
@@ -314,15 +513,21 @@ Reboot note if microcode changed.
 - Sony (50/80/100), Toshiba (80/100), MSI (`msi_ec`, specific models, start forced to stop−10): table entries with path, accepted values, read-back.
 - The ladder is a data table (`internal/battery/vendors.go`): vendor match (DMI + driver), path glob, value candidates, write order, read-back rule. Adding a vendor is a table row plus its primary-source citation in debian13-notes.md.
 
-**Method 3: software fallback.** If `charge_behaviour` exists and lists `inhibit-charge`: install `kiln-battery-watch.service` (or a 1-minute timer). It reads `capacity`, sets `inhibit-charge` at ≥ 80%, and sets `auto` at ≤ 75% (hysteresis). It's idempotent and logs only on transitions.
+**Method 3: software fallback.** If `charge_behaviour` exists and lists `inhibit-charge` (6.12 offers `auto`, `inhibit-charge` and `force-discharge`; `inhibit-charge-awake` exists only on newer kernels such as the backports 7.2, and is used only where listed): install `kiln-battery-watch.service` (or a 1-minute timer). It reads `capacity`, sets `inhibit-charge` at ≥ 80%, and sets `auto` at ≤ 75% (hysteresis). It's idempotent and logs only on transitions.
 
 **Method 4: nothing works.** The summary says so clearly with the DMI vendor + product, lists what was probed, and suggests BIOS/UEFI options: "Battery Care", "Adaptive Battery Optimizer", "Battery Health Manager", "Primarily AC use", "Charge limit". It may mention that a smart plug driven by battery percentage is a possible idea (not built).
 
 ### Persistence
 
-- `kiln-battery.service` (oneshot, `ExecStart=/usr/local/bin/kiln battery apply`) runs at boot.
-- udev rule `/etc/udev/rules.d/90-kiln-battery.rules`: on `SUBSYSTEM=="power_supply"` change/add events (AC online changes, battery add), `TAG+="systemd", ENV{SYSTEMD_WANTS}+="kiln-battery.service"`.
-- `kiln-battery.timer` (every 15 min) as a safety net. Something else writing the sysfs file (UPower, firmware) doesn't emit a uevent.
+- `kiln-battery.service` (oneshot, `ExecStart=/usr/local/bin/kiln battery apply`, **no** `RemainAfterExit=yes`, so every later start runs again), enabled for boot.
+- udev rule `/etc/udev/rules.d/90-kiln-battery.rules`:
+  ```
+  SUBSYSTEM=="power_supply", ACTION=="change", ATTR{type}=="Mains", RUN+="/usr/bin/systemctl --no-block start kiln-battery.service"
+  SUBSYSTEM=="power_supply", ACTION=="add", ATTR{type}=="Battery", RUN+="/usr/bin/systemctl --no-block start kiln-battery.service"
+  ```
+  `ENV{SYSTEMD_WANTS}` can't be used: systemd.device(5) acts on device Wants only when a device first becomes active, never on change events such as AC plug and unplug. Starting the same unit from boot, udev and the timer means systemd never runs two copies at once.
+- `kiln-battery.timer` (every 15 min) as a safety net: threshold writes by anything else (UPower, firmware) emit no uevent.
+- **Locking.** The battery step, `kiln battery apply` and `kiln battery watch` all take `/run/kiln/battery.lock`, so a udev- or timer-triggered apply can never write at the same time as the step (D41).
 - `kiln battery apply` re-runs the ladder starting from the recorded method (stored in `/etc/kiln/state.json` under `battery`) and falls back to the full ladder if that method stops working.
 
 ### GNOME "Preserve Battery Health" (UPower)
@@ -330,7 +535,7 @@ Reboot note if microcode changed.
 Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables the feature only when `charge_control_start_threshold` exists. The limits come from hwdb `CHARGE_LIMIT` (default `75,80`). The on/off flag lives in a `charging-threshold-status` file in UPower's state dir, not in `UPower.conf`. **Enabling** writes start then end, which can fail on ThinkPads because of write order. **Disabling writes 0/100** and clobbers our limits.
 
 **Owner: kiln.** So that the two can't disagree:
-1. Write `/etc/udev/hwdb.d/61-kiln-battery.hwdb` setting `CHARGE_LIMIT=<accepted start>,<accepted stop>` for this machine's battery, then run `systemd-hwdb update` and `udevadm trigger -s power_supply`. If someone turns GNOME's toggle on, it applies the same values.
+1. **Before** kiln writes any threshold (so UPower's restart can't overwrite kiln's values afterwards), write `/etc/udev/hwdb.d/61-kiln-battery.hwdb` with a match `battery:<kernel name>:<model_name>:<dmi modalias>` (UPower 1.90.9's key format) setting `CHARGE_LIMIT=<accepted start>,<accepted stop>`. A later-sorting hwdb file wins over UPower's `60-upower-battery.hwdb`. Then run `systemd-hwdb update`, `udevadm trigger -s power_supply` and `systemctl try-restart upower`, so UPower picks up the new limit (that last part is inferred, not verified). If someone turns GNOME's toggle on, it applies the same values. At startup UPower re-applies start then end when its saved state is "enabled".
 2. The summary note says: "Battery limit is managed by kiln. Leave GNOME's *Preserve Battery Health* switch alone; turning it **off** resets the limit to 100% until kiln re-applies it (within 15 minutes)."
 3. `kiln battery status` reports UPower's `ChargeThresholdEnabled` (D-Bus) alongside the sysfs values.
 
@@ -349,23 +554,39 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 
 ## 14. firewall
 
-**ID** `firewall` · security · depends: preflight · **risky** · option: backend (default firewalld)
+**ID** `firewall` · security · depends: preflight, ssh options (for the port) · **risky** · option: backend (default firewalld)
+
+**Facts used** (firewalld 2.3.1):
+- **Installing starts it.** Debian enables and starts firewalld on install, with default zone `public`. `public` allows `ssh` and `dhcpv6-client` and rejects everything else (ICMP is allowed).
+- **Services:** the shipped definitions include `cockpit` (9090/tcp), `rdp` (3389/tcp) and `ssh` (22/tcp).
+- **Zones:** `--new-zone` exists only with `--permanent`. Source-based zones take LAN packets exclusively, because there's no zone drifting.
+- **Reloads:** a reload only replaces `table inet firewalld`, so fail2ban's `f2b-table` survives.
+- **`--check-config`** checks the permanent config.
 
 **Actions (firewalld):**
-1. Install `firewalld` (it uses the nftables backend).
-2. If an SSH server is detected, the default zone (`public`) allows `ssh` (and the custom SSH port if set) **before** firewalld is enabled. That keeps later remote access working. Docker is installed after this step (catalog order), and Docker recreates its rules on a firewalld reload (≥ 28.1).
-3. LAN subnets: auto-detect private IPv4 (RFC1918: 10/8, 172.16/12, 192.168/16) and IPv6 ULA (fc00::/7) subnets on physical NICs only. Global IPv6 prefixes are never treated as LAN (decision D20). Skip `lo docker* br-* veth* virbr* tun* tap* wg* tailscale*`.
-4. Create zone `kiln-lan` with `sources` = the LAN subnets, and services `cockpit` + `rdp` (3389/tcp, only if GNOME is detected) + `ssh` (only if an SSH server is detected). Re-runs replace the zone's sources and services entirely (no stale rules).
-5. No LAN detected → don't create `kiln-lan`, keep Cockpit/RDP closed, and note that Cockpit is then only reachable locally (`https://localhost:9090`) or through an SSH tunnel (`ssh -L 9090:localhost:9090 <user>@<host>`).
-6. Verify, then revert on failure: record `pending`, apply to **runtime** only, then check that firewalld is running and the zones and services read back as expected (`firewall-cmd --get-active-zones`, `--zone=... --list-all`). If that passes, run `--runtime-to-permanent` and clear `pending`. If it fails, run `firewall-cmd --reload` (back to the previous permanent config), or stop and disable firewalld if this step enabled it, then record `failed`.
+1. Back up `/etc/firewalld/` (tarball under `/var/lib/kiln/backup/`) and record `pending`.
+2. Install `firewalld`. It starts immediately with `public`, which already allows SSH on port 22.
+3. LAN subnets: auto-detect private IPv4 (RFC1918: 10/8, 172.16/12, 192.168/16) and IPv6 ULA (fc00::/7) subnets on physical NICs only. Skip `lo docker* br-* veth* virbr* tun* tap* wg* tailscale*`. Global IPv6 prefixes are never treated as LAN (D20).
+4. Write the permanent config as **managed files**, so re-runs replace them wholesale:
+   - `/etc/firewalld/zones/kiln-lan.xml`: `<source address=…/>` for each LAN subnet, plus services `cockpit`, `rdp` (only if GNOME is detected) and `ssh` (only if an SSH server is detected). It also gets the custom SSH port as a `<port>` when it isn't 22. LAN packets are handled **only** by `kiln-lan`, so a port opened only in `public` would lock LAN clients out.
+   - Custom SSH port: added to `public` as well, with `firewall-cmd --permanent --zone=public --add-port=<n>/tcp`. If the port changed from an old custom value, the old one is removed.
+   - Extra open ports from the options go to `public`.
+   - No LAN detected: no `kiln-lan` file. Cockpit/RDP stay closed, with a note that Cockpit is then only reachable locally (`https://localhost:9090`) or through an SSH tunnel (`ssh -L 9090:localhost:9090 <user>@<host>`).
+   - Option "block Docker published ports": `StrictForwardPorts=yes` in `/etc/firewalld/firewalld.conf` (key-level edit).
+5. `firewall-cmd --check-config`, then `firewall-cmd --reload`, then check that:
+   - `firewall-cmd --state` is running;
+   - `--get-active-zones` shows `kiln-lan` bound to the expected sources;
+   - `--zone=kiln-lan --list-all` and `--zone=public --list-all` match.
+6. If the check passes, clear `pending`. If **this run changed** the firewall config and Docker is installed and running, `systemctl restart docker`, so its `docker` zone and policy are recreated. That restarts containers, so it never happens on an unchanged re-run.
 
-**Check:** firewalld is active, the default zone allows SSH (when an SSH server is detected), and `kiln-lan` has exactly the expected sources and services.
+   If it fails: restore the `/etc/firewalld/` backup and `firewall-cmd --reload`. If this step installed firewalld, run `systemctl disable --now firewalld` instead. Record `failed`.
+
+**Check:** firewalld is active, the default zone is `public` with `ssh` (when an SSH server is detected) and the custom port, `kiln-lan.xml` matches the expected content, and the active zones match.
 
 **Gotchas:**
-- Docker-published ports (`-p`) bypass zone rules while firewalld's `StrictForwardPorts=no` (the default). Docker puts its bridges in a `docker` zone with a `docker-forwarding` policy. Note: "bind private services to 127.0.0.1 or a LAN IP".
-- Option `firewall.strict_docker_ports` (default **off**, decision D16; firewalld ≥ 2.3.0, trixie has 2.3.1) sets `StrictForwardPorts=yes`, so published ports stay blocked until you add a firewalld forward-port. When it's off, the summary always carries the `-p` warning.
-- Docker ≥ 28.3.3 is needed for a fix where a firewalld reload made loopback-bound published ports reachable from the LAN. Trixie's own `docker.io` is 26.1.5, which is another reason to use Docker's repo.
-- The nftables alternative is a single managed `/etc/nftables.conf` with the same rules, the `nftables.service` enabled, and the same verify-then-revert. Coexisting with Docker's own rules is the hard part (Docker's nftables backend is experimental in 29.x).
+- **Published ports:** Docker-published ports (`-p`) bypass zone rules while `StrictForwardPorts=no` (the default; D16). Docker puts its bridges in a `docker` zone (target ACCEPT, so containers can reach every host port) with a `docker-forwarding` policy. The summary always says: "bind private services to 127.0.0.1 or a LAN IP".
+- **Docker version:** Docker ≥ 28.3.3 is needed for the fix where a firewalld reload made loopback-bound published ports reachable from the LAN. Current Docker CE is 29.9.3. Trixie's own `docker.io` is 26.1.5, so use Docker's repo.
+- **nftables alternative:** it must never use Debian's stock `/etc/nftables.conf` or `nftables.service`. The stock file starts with `flush ruleset`, and the service's stop runs `nft flush ruleset`; both would wipe Docker's and fail2ban's tables. Docker's docs also don't support hand-written `nft` rules alongside Docker. So the nftables backend owns only `table inet kiln`, loaded by a `kiln-firewall.service` that runs `nft delete table inet kiln` (ignored if absent) then `nft -f /etc/kiln/firewall.nft`. With Docker installed, kiln recommends firewalld.
 
 ---
 
@@ -377,17 +598,36 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 
 **Applies:** an SSH server was detected (you chose "SSH server" in the installer). Otherwise "not applicable: no SSH server installed (choose 'SSH server' in the Debian installer)". kiln never installs one.
 
+**Facts used** (openssh 1:10.0p1-7+deb13u4):
+- **Include order:** Debian's `sshd_config` has `Include /etc/ssh/sshd_config.d/*.conf` at line 13. Drop-ins are read in lexical order and the first value wins, and debconf answers are written after the Include, so a low-numbered drop-in wins.
+- **Debian's defaults:** `KbdInteractiveAuthentication no`, `UsePAM yes` and `X11Forwarding yes`. Upstream defaults are `PermitRootLogin prohibit-password` and `MaxAuthTries 6`.
+- **`Port` is cumulative.** Every `Port` line across all files is added, rather than the first one winning.
+- **Units:** `ssh.service` is enabled, and its `ExecReload` runs `sshd -t` then HUP. `ssh.socket` ships disabled.
+- **Keys:** DSA is gone. `ssh-rsa` keys still work, using rsa-sha2 signatures.
+
 **Actions:**
-1. Keys: fetch `https://github.com/<GitHub user>.keys` (HTTPS, size cap, each line validated with `ssh-keygen -l -f`), and add the extra keys from the options. Merge them into `~user/.ssh/authorized_keys` (0600, directory 0700, owned by the user), adding missing keys only and never removing existing ones. Lines get a trailing comment ` kiln:github` or ` kiln:manual`.
-2. Drop-in `/etc/ssh/sshd_config.d/10-kiln.conf`. Verified: Debian's `sshd_config` includes `sshd_config.d/*.conf` near the top in lexical order, and the first value wins, so a low number takes precedence. Contents:
-   - `PermitRootLogin no`, `MaxAuthTries 4`, `X11Forwarding no`, `KbdInteractiveAuthentication no`;
+1. **Keys.**
+   - Fetch `https://github.com/<GitHub user>.keys` over HTTPS, with a size cap and a 10 s timeout. A 404 means the user doesn't exist, which is an error in the options form. A 200 with an empty body means "no public keys". The endpoint is undocumented but stable: plain text, one `type base64` per line.
+   - Add the extra keys from the options.
+   - Validate each line by writing it to a temp file and running `ssh-keygen -l -f <tmp>`. `ssh-dss` lines are skipped with a note.
+   - Merge into `<home>/.ssh/authorized_keys` (0600, directory 0700, owned by the user). Deduplicate on key type + blob, never on the whole line. Only missing keys are added, and nothing is ever removed. Added lines get a trailing comment ` kiln:github` or ` kiln:manual`.
+2. **Drop-in** `/etc/ssh/sshd_config.d/10-kiln.conf`:
+   - `PermitRootLogin no`, `MaxAuthTries 4` (the owner's choice), `X11Forwarding no`.
    - `PasswordAuthentication no` **only if** the user has at least one valid key installed. Otherwise it stays `yes`, with a loud warning on the review screen and in the summary: "passwordless sudo + password SSH on the internet is risky".
-3. Port (when it's not 22): `Port <n>` in the drop-in, plus the firewall service or port. Verified: trixie enables `ssh.service`, and `ssh.socket` is shipped but **not enabled**, so `Port` in the drop-in works. If `ssh.socket` was enabled by hand, the port goes in an `ssh.socket` drop-in (`ListenStream=`) instead, which needs `daemon-reload` and `restart ssh.socket`.
-4. Verify, then revert on failure: record `pending` and validate with `sshd -t`. Then apply with `systemctl reload ssh`, and check that `ssh` is active, that `sshd -T` shows the expected values, and that something is listening on the port (`ss -ltn`). If any of that fails, restore the previous drop-in, reload, and record `failed`.
+   - `KbdInteractiveAuthentication no` is left out, because Debian already sets it.
+3. **Port** (when it isn't 22): `Port <n>` in the drop-in. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`. The firewall step has already opened the port in both zones.
+4. **Verify, then revert on failure:**
+   1. Record `pending` and validate with `sshd -t`.
+   2. Apply with `systemctl reload ssh`.
+   3. Check:
+      - `ssh` is active;
+      - something is listening on the port (`ss -ltn`);
+      - `sshd -T -C user=<target>,host=<hostname>,addr=<lan-ip>` shows the expected values. Without `-C`, `-T` ignores `Match` blocks, so a `Match User` block that re-enables passwords would go unseen.
+   4. If anything fails, restore the previous drop-in, reload, and record `failed`.
 
-**Check:** the keys are present, the drop-in matches, `sshd -T` shows the effective values, and the port is listening.
+**Check:** the keys are present, the drop-in matches, the `sshd -T -C …` values match, and the port is listening.
 
-**Gotchas:** the service is `ssh`, not `sshd`. OpenSSH 10.0 in trixie dropped DSA keys, so `ssh-dss` lines from GitHub are skipped with a note. Router port forwarding is manual, so it's only noted.
+**Gotchas:** the service is `ssh` (`sshd.service` is an alias). `MaxAuthTries 4` can lock out SSH agents that offer more than 4 keys before the right one. The summary notes `IdentitiesOnly yes` / `IdentityFile` as the client-side fix. Router port forwarding is manual, so it's only noted.
 
 ---
 
@@ -397,25 +637,34 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 
 **Applies:** an SSH server was detected, because the only jail is `sshd`. Otherwise "not applicable: no SSH server installed".
 
-**Actions:** install `fail2ban python3-systemd`. Debian's `jail.d/defaults-debian.conf` (fail2ban 1.1.0) already sets `banaction = nftables` and `backend = systemd` for sshd. kiln keeps the nftables ban action under **both** firewall backends: it uses its own `f2b-table`, coexists with firewalld, and survives `firewall-cmd --reload`. Write `/etc/fail2ban/jail.d/50-kiln.local`:
+**Facts used** (fail2ban 1.1.0-8):
+- **Debian defaults:** `jail.d/defaults-debian.conf` sets `banaction = nftables`, `banaction_allports = nftables[type=allports]`, and `[sshd] enabled = true`, `backend = systemd`, `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`.
+- **Read order** (later wins): `jail.conf` → `jail.d/*.conf` → `jail.local` → `jail.d/*.local`, alphabetically.
+- **nftables action:** uses its own `table inet f2b-table` (input hook, priority −1). That makes it independent of firewalld, and it survives firewalld reloads.
+
+**Actions:** install `fail2ban python3-systemd`, then write `/etc/fail2ban/jail.d/50-kiln.local`:
 ```
 [DEFAULT]
-backend = systemd
-banaction = nftables
-banaction_allports = nftables[type=allports]
 ignoreip = 127.0.0.1/8 ::1 <LAN subnets>
 bantime = 1h
 bantime.increment = true
 maxretry = 5
+
 [sshd]
 enabled = true
-port = <ssh ports>
+backend = systemd
+port = <ssh ports, comma-separated>
+banaction = %(banaction_allports)s
+journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd + _COMM=sshd-session
 ```
-Restart fail2ban, then `fail2ban-client ping` and `fail2ban-client status sshd`.
+- `banaction_allports` bans the attacker on every port, so a later SSH port change can't leave the new port unprotected.
+- The jail-level `journalmatch` replaces the filter's own, so kiln includes `_COMM=sshd-session`. That's what keeps bans working if `ssh.socket` (`sshd@…` units) is ever used.
 
-**Check:** the file matches, the service is active, and the jail is running.
+Restart fail2ban, then run `fail2ban-client ping` and `fail2ban-client status sshd`.
 
-**Gotchas:** trixie has no `/var/log/auth.log` by default (no rsyslog), so `backend = systemd` is required, and kiln sets it in `[DEFAULT]` so any future jail inherits it.
+**Check:** the file matches, the service is active, and the `sshd` jail is running.
+
+**Gotchas:** trixie has no `/var/log/auth.log` by default (no rsyslog), so the journal backend is essential. Debian already sets it for sshd; kiln restates it in the jail.
 
 ---
 
@@ -423,17 +672,24 @@ Restart fail2ban, then `fail2ban-client ping` and `fail2ban-client status sshd`.
 
 **ID** `docker` · apps · depends: apt-sources, firewall
 
-**Actions:**
-1. Remove the conflicting packages if present: `docker.io docker-compose docker-doc docker-buildx podman-docker containerd runc` (list from Docker's Debian install docs, verified).
-2. Keyring: download `https://download.docker.com/linux/debian/gpg` to `/etc/apt/keyrings/docker.asc` (0644).
-3. `/etc/apt/sources.list.d/docker.sources`: `Types: deb`, `URIs: https://download.docker.com/linux/debian`, `Suites: trixie`, `Components: stable`, `Architectures: amd64`, `Signed-By: /etc/apt/keyrings/docker.asc` (verified: `dists/trixie` exists, amd64).
-4. Install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`.
-5. `/etc/docker/daemon.json` (JSON, no comment header): `{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}`, merged with existing keys. Restart docker.
-6. Add the user to `docker`. Run `docker run --rm hello-world` (as root).
+**Actions** (Docker's Debian install docs, current release 29.9.3):
+1. Remove the conflicting packages if present: `docker.io docker-compose docker-doc docker-buildx podman-docker containerd runc`.
+2. `install -m 0755 -d /etc/apt/keyrings`, then download `https://download.docker.com/linux/debian/gpg` to `/etc/apt/keyrings/docker.asc`, mode 0644 (world-readable, as the docs require).
+3. `/etc/apt/sources.list.d/docker.sources`: `Types: deb`, `URIs: https://download.docker.com/linux/debian`, `Suites: trixie`, `Components: stable`, `Architectures: amd64`, `Signed-By: /etc/apt/keyrings/docker.asc`. Then `AptUpdate`.
+4. Install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`. `docker-ce` depends on `iptables` and `nftables`; Debian's iptables is the nft variant, which Docker supports.
+5. `/etc/docker/daemon.json` (JSON, no comment header): merge `{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}` into the existing keys. log-opts values must be strings, and they apply to **new** containers only (noted).
+   - Parse the merged result in Go before writing.
+   - If `dockerd --help` lists `--validate` (detected at run time, fact R), also run `dockerd --validate --config-file /etc/docker/daemon.json` before `systemctl restart docker`.
+   - If docker doesn't come back active, restore the previous file, restart, and record `failed`.
+6. `UserAddGroup(user, docker)`. Wait until `docker info` succeeds (up to 60 s; docker starts asynchronously after install or restart), then run `docker run --rm hello-world` as root. `systemctl restart docker` happens only when `daemon.json` actually changed, because it restarts running containers.
 
 **Check:** the packages are installed, daemon.json contains the keys, the user is in the group, and docker is active.
 
-**Notes:** "log out and back in for docker group"; "`-p` published ports bypass host firewall zones, so bind private services to 127.0.0.1". Membership in the docker group equals root.
+**Notes:**
+- "log out and back in for docker group membership";
+- "`-p` published ports bypass host firewall zones, so bind private services to 127.0.0.1";
+- "the docker group is root-equivalent";
+- "existing containers keep their old log settings".
 
 ---
 
@@ -441,11 +697,19 @@ Restart fail2ban, then `fail2ban-client ping` and `fail2ban-client status sshd`.
 
 **ID** `cockpit` · apps · depends: apt-sources, firewall, network-migration (soft: works without it, but the networking page needs NM)
 
-**Actions:** install `cockpit` from `trixie-backports` (`-t trixie-backports`, 371 today) if `apt.backports` is on, otherwise from main (337). `cockpit-networkmanager` depends on network-manager and doesn't work with ifupdown-defined interfaces, which is why `network-migration` exists. Never install `cockpit-machines` or `cockpit-podman`, and pass `--no-install-recommends` if recommends would pull them in (verify which recommends it has). Enable `cockpit.socket`.
+**Actions:**
+- Install `cockpit`. With backports on, use `apt-get install -t trixie-backports cockpit` (371). The `(>= source:Version)` dependencies pull the matching 371 binaries from backports. Without backports, install from main (337).
+- **Keep Recommends**. In both versions they're `cockpit-storaged`, `cockpit-networkmanager` and `cockpit-packagekit`, and `cockpit-networkmanager` is the networking page.
+- `cockpit-machines` and `cockpit-podman` are not recommended, and kiln never installs them.
+- The Recommends pull in `network-manager`, `packagekit` and `udisks2`. The review screen lists them, even on machines where network-migration is off or not applicable.
+- `cockpit.socket` is enabled and started by the package (`ListenStream=9090`). kiln only verifies this.
 
-**Check:** installed (from the expected suite) and `cockpit.socket` is enabled.
+**Check:** `cockpit` is installed from the expected suite, `cockpit-networkmanager` is installed, and `cockpit.socket` is enabled and active.
 
-**Notes:** `https://<lan-ip>:9090`, who it's open to (the `kiln-lan` subnets, or "closed: use the SSH tunnel"), and that login uses the target user's password (root login is disallowed by Cockpit's default `/etc/cockpit/disallowed-users`).
+**Notes:**
+- `https://<lan-ip>:9090`;
+- who it's open to (the `kiln-lan` subnets, or "closed: use localhost or an SSH tunnel");
+- login uses the target user's password. On a fresh install the postinst writes `root` into `/etc/cockpit/disallowed-users`.
 
 ---
 
@@ -455,27 +719,82 @@ Restart fail2ban, then `fail2ban-client ping` and `fail2ban-client status sshd`.
 
 **Applies:** GNOME detected. Otherwise "not applicable: no GNOME desktop installed".
 
-**Actions:** install `gnome-remote-desktop` 48.x if missing (the GNOME task usually brings it). Use system mode (RDP at the login screen, no user logged in). Verified against the 48.1 source: `--system` must be the **first** argument, and grdctl re-executes itself via `pkexec --user gnome-remote-desktop`. As root, kiln runs the equivalent directly with `runuser -u gnome-remote-desktop -- grdctl ...` (verify against the grd-ctl.c source and polkit rules which of the two works without a prompt).
-1. Generate a self-signed TLS key/cert (`openssl req -x509 -newkey rsa:4096 -nodes`) into `~gnome-remote-desktop/.local/share/gnome-remote-desktop/` (home is `/var/lib/gnome-remote-desktop`), owned by and readable only by that user.
-2. `grdctl --system rdp set-tls-key <key>`, then `grdctl --system rdp set-tls-cert <crt>`.
-3. `grdctl --system rdp set-credentials`, with **no username/password args**: it prompts on stdin, so kiln writes `<user>\n<password>\n` to its stdin. The password never appears in argv or logs.
-4. `grdctl --system rdp enable` (in system mode this also enables the unit), then `systemctl enable --now gnome-remote-desktop.service`. The Debian postinst leaves it disabled by default.
+**Purpose:** RDP at the login screen (GNOME Remote Desktop "system" mode), reachable from the LAN only.
 
-The password comes from the wizard: masked, with a confirm field, or "generate one" (shown once, stored in `/etc/kiln/secrets/rdp`, and shown again by `kiln secrets show rdp`).
+**How grdctl is run** (verified against `src/grd-ctl.c` in gnome-remote-desktop 48.1-4):
+- `grdctl --system ...` as root re-executes itself through `pkexec --user gnome-remote-desktop` with no prompt, because polkit always authorizes uid 0.
+- That path has two problems: it needs the separate `pkexec` package, and it **always exits 0** even when the inner command fails.
+- grdctl also enters system mode by itself whenever its euid is the `gnome-remote-desktop` user.
 
-LAN-only via the firewall's `kiln-lan` zone (`rdp` service).
+So kiln runs every grdctl command **as the daemon user, without `--system`**, which gives real exit codes:
 
-**Check:** `grdctl --system status` (without `--show-credentials`) shows RDP enabled, the TLS files are set, and the credentials are set. It can't compare the password, so it checks a hash marker kiln keeps next to the secret file.
+`runuser -u gnome-remote-desktop -- env -i HOME=/var/lib/gnome-remote-desktop PATH=/usr/bin:/bin grdctl rdp …`, with cwd set to that home.
+
+**Actions:**
+1. Install `gnome-remote-desktop polkitd`. `rdp enable` starts the unit through `/usr/libexec/gnome-remote-desktop-enable-service`, which does a polkit check, and gnome-remote-desktop doesn't depend on polkitd. The `gnome-remote-desktop` system user and its home (`/var/lib/gnome-remote-desktop`, 0700) are created by the package's sysusers/tmpfiles.
+2. TLS, as the daemon user:
+   - `mkdir -p /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop`;
+   - `openssl req -x509 -newkey rsa:4096 -noenc -days 3650 -subj /CN=<hostname> -keyout …/tls.key -out …/tls.crt`. openssl's default is 30 days, and it prompts for a subject without `-subj`. `-nodes` is deprecated, so use `-noenc`.
+   - Key mode 0600. Skip this sub-step if both files exist and the cert expires in more than 30 days.
+3. `grdctl rdp set-tls-key /var/lib/gnome-remote-desktop/.local/share/gnome-remote-desktop/tls.key`, then `grdctl rdp set-tls-cert …/tls.crt`. Paths must be absolute.
+4. `grdctl rdp set-credentials <rdp user>`, with **only** `<password>\n` on stdin. Don't send the user name and password together on stdin: each prompt opens a new buffered reader on fd 0, so the first prompt can swallow both lines, and the second then crashes on EOF. The password never appears in argv or logs.
+5. `grdctl rdp enable`, which enables and starts `gnome-remote-desktop.service`. Then `systemctl enable --now gnome-remote-desktop.service` (a harmless no-op that makes the state explicit). The unit ships disabled because `debian/rules` uses `dh_installsystemd --no-enable`.
+
+The password comes from the wizard: masked, with a confirm field, or "generate one" (shown once, stored in `/etc/kiln/secrets/rdp`, and shown again by `kiln secrets show rdp`). Port 3389. LAN-only via the firewall's `kiln-lan` zone (firewalld's `rdp` service is tcp/3389).
+
+**Check** (same runuser form): `grdctl status` shows RDP `enabled` and both TLS paths, and lists Username/Password as `(hidden)` (so they are set). `systemctl is-enabled gnome-remote-desktop.service` succeeds. The password itself can't be read back, so kiln compares a hash marker it keeps next to the secret file.
 
 ---
 
 ## 20. autoupdates
 
-**ID** `autoupdates` · security · depends: apt-sources
+**ID** `autoupdates` · security · depends: apt-sources. It runs after every step that adds a repository, and `origin=*` covers whatever repositories exist (D43).
 
-**Actions:** install `unattended-upgrades apt-listchanges needrestart` (all in trixie main). Write `/etc/apt/apt.conf.d/52kiln-unattended-upgrades`: Origins-Pattern for security only (or all, if `scope: all`: `origin=Debian,codename=${distro_codename}` and `-updates`), `Unattended-Upgrade::Automatic-Reboot "false"`. Write `/etc/apt/apt.conf.d/20auto-upgrades` with `APT::Periodic::Update-Package-Lists "1"` and `Unattended-Upgrade "1"`. Write `/etc/needrestart/conf.d/50-kiln.conf` with `$nrconf{restart} = 'a';`. Verified: needrestart 3.11 evaluates `conf.d/*.conf` in sorted order, and its default is `'i'`, which falls back to list-only when non-interactive. The `NEEDRESTART_MODE=a` env var covers kiln's own apt runs.
+**Policy** (D40): **every package from every configured repository** updates automatically **every 12 hours** (refresh, then upgrade). That covers Debian (trixie, trixie-updates, trixie-security, backports), Docker, the GitHub CLI, Google Chrome and NVIDIA.
 
-**Check:** the files match and `unattended-upgrades.service` is enabled.
+**Facts used** (apt 3.0.3, unattended-upgrades 2.12, needrestart 3.11, apt-listchanges 4.8):
+- **Debian's units:**
+  - `apt-daily.timer` (`OnCalendar=*-*-* 6,18:00`, `RandomizedDelaySec=12h`) runs `apt.systemd.daily update`.
+  - `apt-daily-upgrade.timer` (`OnCalendar=*-*-* 6:00`, `RandomizedDelaySec=60m`, `After=apt-daily.timer`) runs `apt.systemd.daily install`, which runs `unattended-upgrade`.
+  - Both services have `ConditionACPower=true`, so they skip while running on battery.
+- **Intervals:** `apt.systemd.daily` counts its intervals in days by default. It also accepts `s`/`m`/`h`/`d` suffixes or `always`, "which can be used with systemd OnCalendar overrides to define custom schedules".
+- **Origin matching:** unattended-upgrades matches `Origins-Pattern` values with `fnmatch`, so `origin=*` matches every repository. It only **upgrades installed packages** (and pulls in their new dependencies); it never installs a package just because a repository has one. For backports, that means only packages you already took from backports.
+- **Accumulating config:** Debian's `50unattended-upgrades` origins add up across files, and `#clear` resets them. `20auto-upgrades` is ucf-managed from debconf `unattended-upgrades/enable_auto_updates`.
+- **Repository origins:** Debian `Debian` / `Debian Backports`, Docker `Docker`, GitHub CLI `gh`, Chrome `Google LLC`, NVIDIA `NVIDIA` (label `NVIDIA CUDA`).
+
+**Actions:**
+1. Preseed `unattended-upgrades unattended-upgrades/enable_auto_updates boolean true`, then install `unattended-upgrades apt-listchanges needrestart`. The package writes `20auto-upgrades`; kiln doesn't rewrite that ucf-managed file.
+2. Write `/etc/apt/apt.conf.d/52kiln-unattended-upgrades`, which sorts after `20auto-upgrades` and `50unattended-upgrades`, so its values win:
+   ```
+   // Managed by kiln
+   APT::Periodic::Update-Package-Lists "always";
+   APT::Periodic::Unattended-Upgrade "always";
+   #clear Unattended-Upgrade::Origins-Pattern;
+   Unattended-Upgrade::Origins-Pattern {
+       "origin=*";
+   };
+   Unattended-Upgrade::Automatic-Reboot "false";
+   ```
+   - `always` hands the schedule to the timers below; without it, the day-based stamps would skip the second run of the day.
+   - `origin=*` is the literal "all packages".
+   - With the `security` scope option, the pattern is instead the single line `"origin=Debian,codename=${distro_codename}-security,label=Debian-Security"`.
+3. Timer overrides, so a refresh and an upgrade both run twice a day. They keep Debian's 06:00/18:00 slots, and the upgrade runs 30 minutes after the refresh:
+   - `/etc/systemd/system/apt-daily.timer.d/60-kiln.conf`: `[Timer]`, `OnCalendar=` (clears Debian's), `OnCalendar=*-*-* 06,18:00`, `RandomizedDelaySec=15m`.
+   - `/etc/systemd/system/apt-daily-upgrade.timer.d/60-kiln.conf`: `[Timer]`, `OnCalendar=`, `OnCalendar=*-*-* 06,18:30`, `RandomizedDelaySec=15m`.
+   - Then `systemctl daemon-reload` only. The timers are runtime-masked for the whole kiln run (architecture: "Nothing else changes packages during a run"). Restarting them here would let unattended-upgrades start while later steps still use apt, so they start again only in the end-of-run restore (D41).
+4. `/etc/needrestart/conf.d/50-kiln.conf`: `$nrconf{restart} = 'a';`. needrestart's default `'i'` becomes list-only when nothing is interactive, so without this, services wouldn't restart after their libraries update.
+
+**Check:**
+- `apt-config dump` shows both Periodic values as `always`, and exactly the expected `Origins-Pattern` entry.
+- The two timer drop-ins match.
+- `systemctl list-timers apt-daily.timer apt-daily-upgrade.timer` shows both active, with next runs at the 06/18 slots.
+- The needrestart file matches.
+
+**Notes in the summary:**
+- "Updates run at about 06:00 and 18:00, refresh then upgrade 30 minutes later, and skip while on battery. Logs are in `/var/log/unattended-upgrades/`."
+- "Kernel and NVIDIA driver updates need a reboot to take effect. kiln never reboots automatically; `/run/reboot-required` shows when one is pending."
+- "A Docker update restarts the Docker daemon. Containers come back only if they have a restart policy."
+- "A new NVIDIA driver branch can arrive unattended, because the branch isn't pinned (D39)."
 
 ---
 
@@ -483,11 +802,21 @@ LAN-only via the firewall's `kiln-lan` zone (`rdp` service).
 
 **ID** `node` · dev · depends: devtools · runs as the user
 
-**Actions:** through `fetch.PipedInstaller`: download `https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh` (pinned; wget if curl is missing), run it with `bash` as the user, with `PROFILE=/dev/null` so it doesn't edit `.bashrc` itself (kiln's bashrc.d drop-in sources nvm instead). Then, as the user, run a single `bash` invocation without errexit: `. "$HOME/.nvm/nvm.sh"; nvm install 26; nvm alias default 26; node -v && npm -v`. That script is a fixed constant passed as a file, not interpolated. Write `~/.bashrc.d/50-kiln-nvm.sh`.
+**Actions:**
+1. `mkdir -p <home>/.nvm` as the user.
+2. Through `a pinned `sys.Fetch` download run with `bash <file>` as the user`: download `https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh` (pinned), and run it with `bash` as the user with `PROFILE=/dev/null NVM_DIR=<home>/.nvm METHOD=script`:
+   - `PROFILE=/dev/null` stops it editing shell files, because kiln's drop-in sources nvm instead;
+   - an explicit `NVM_DIR` that doesn't exist makes install.sh exit 1, hence step 1;
+   - `METHOD=script` makes the download method deterministic (curl or wget) instead of depending on whether git is installed.
+3. As the user, run one `bash` invocation **without errexit**, from a fixed script file (not interpolated): `. "$NVM_DIR/nvm.sh"; nvm install 26; nvm alias default 26; node -v && npm -v`.
+4. Write `<home>/.bashrc.d/50-kiln-nvm.sh`: `export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; [ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"`.
 
-**Check:** `~/.nvm/nvm.sh` exists, the nvm default alias resolves to v26.x, and `node -v` reports v26.
+**Check:** `<home>/.nvm/nvm.sh` exists, `nvm version default` resolves to v26.x, and `node -v` reports v26 (all run through the same no-errexit bash form).
 
-**Gotchas:** never source nvm under `set -e`. nvm v0.41.0 and Node 26 are the owner's pinned choices. Don't "upgrade" them without being asked. nvm v0.41.0 is no longer the newest nvm, so the pin is deliberate.
+**Gotchas:**
+- Never source nvm under `set -e`.
+- nvm v0.41.0 (released 2026-11-04) is the latest nvm, and Node 26 is LTS ("Lithium", since v26.13.0 on 2026-10-28). Both are the owner's pinned choices.
+- If `XDG_CONFIG_HOME` were set, nvm's default dir would move; the user-run rule's clean environment prevents that.
 
 ---
 
@@ -496,19 +825,30 @@ LAN-only via the firewall's `kiln-lan` zone (`rdp` service).
 **ID** `python` · dev · depends: devtools · user parts run as the user
 
 **Actions:**
-1. apt: `python3 python3-venv python3-dev pipx libxml2-dev libxslt1-dev libffi-dev`.
-2. uv: **not packaged in trixie** (verified). Install it as the user with `pipx install uv` (pipx is a Debian package, so there's no piped script). The official installer through `fetch.PipedInstaller` (pinned, `UV_NO_MODIFY_PATH=1`) is the fallback option `python.uv_source: installer`.
-3. Venv: `uv venv ~/.venvs/automation`, then `uv pip install --python ~/.venvs/automation requests "httpx[http2]" aiohttp tenacity beautifulsoup4 lxml selectolax parsel scrapy playwright selenium pandas pyyaml python-dotenv rich typer ipython`.
-4. Playwright browsers: as the user, `~/.venvs/automation/bin/playwright install chromium`. System deps are installed **by kiln via apt**, using a list from `playwright install-deps --dry-run chromium` (verify it prints the apt command), rather than letting Playwright call apt itself.
-5. `uv tool install ruff`, `pre-commit`, `httpie` (as the user).
-6. Shell: add a one-time `~/.bashrc.d` loop to `~/.bashrc`, guarded by a marker comment:
-   ```bash
-   # kiln: load ~/.bashrc.d
-   for f in "$HOME"/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; unset f
-   ```
-   Then write `~/.bashrc.d/50-kiln-python.sh`: PATH `~/.local/bin`, and `alias pyauto='. ~/.venvs/automation/bin/activate'`.
+1. apt: `python3 python3-venv python3-dev pipx libxml2-dev libxslt1-dev libffi-dev` (Python 3.13.5, pipx 1.7.1). lxml ships wheels, so the `-dev` libraries are only needed for source builds. They're kept because the owner asked for them.
+2. uv (**not packaged in trixie**): as the user, `pipx install uv`, which puts it in `<home>/.local/bin`. A re-run exits 0 with "already seems to be installed". The fallback option `installer` uses the official script via `a pinned `sys.Fetch` download run with `bash <file>` as the user` (pinned, `UV_NO_MODIFY_PATH=1`).
+3. Venv: `uv venv --python /usr/bin/python3 <home>/.venvs/automation`, **skipped when `<home>/.venvs/automation/pyvenv.cfg` exists** (`uv venv` errors on a non-empty path). Then `uv pip install --python <home>/.venvs/automation requests "httpx[http2]" aiohttp tenacity beautifulsoup4 lxml selectolax parsel scrapy playwright selenium pandas pyyaml python-dotenv rich typer ipython`. Every package has cp313 or pure wheels for linux x86_64, and re-running is a no-op.
+4. Playwright (1.64 supports Debian 12 and 13):
+   - as the user, `<venv>/bin/playwright install-deps --dry-run chromium`, after kiln's `AptUpdate`;
+   - exit 0 means nothing is missing;
+   - exit 1 means kiln parses the indented package lines after `Missing system dependencies (N):` and installs them with `AptInstall`, through kiln's apt helper, never letting Playwright run apt itself (D25);
+   - then, as the user, `<venv>/bin/playwright install chromium`.
+5. `uv tool install` takes **one** package per call: `uv tool install ruff`, `uv tool install pre-commit`, `uv tool install httpie`. Binaries go to `<home>/.local/bin`.
+6. Shell:
+   - If `<home>/.bashrc` is missing, copy it from `/etc/skel/.bashrc`.
+   - Append once (guarded by the marker line):
+     ```bash
+     # kiln: load ~/.bashrc.d
+     if [ -d "$HOME/.bashrc.d" ]; then for f in "$HOME"/.bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; unset f; fi
+     ```
+   - Write `<home>/.bashrc.d/50-kiln-python.sh`:
+     ```bash
+     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+     alias pyauto='. "$HOME/.venvs/automation/bin/activate"'
+     ```
+     Debian's skel `.profile` already adds `~/.local/bin` at login. The `case` guard avoids duplicates in terminals.
 
-**Check:** the venv exists with all the packages (`uv pip list`), the chromium browser is installed, the tools are installed, and the drop-ins are present.
+**Check:** `pyvenv.cfg` exists, `uv pip list --python <venv>` includes every package, `playwright install-deps --dry-run chromium` exits 0, the chromium browser directory exists under `<home>/.cache/ms-playwright/`, `uv tool list` shows the three tools, and the marker and drop-ins are present.
 
 ---
 
@@ -517,13 +857,19 @@ LAN-only via the firewall's `kiln-lan` zone (`rdp` service).
 **ID** `go` · dev · depends: devtools
 
 **Actions:**
-1. Resolve the version: `go.version: latest` → `https://go.dev/dl/?mode=json`, the first entry with `stable: true`, file `kind=archive os=linux arch=amd64` (filename + sha256 from the JSON).
-2. Download to `/var/tmp/kiln/`, verify sha256, remove the old `/usr/local/go`, and extract to `/usr/local/go` (owned by root).
-3. `/etc/profile.d/kiln-go.sh`: `export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin`.
-4. As the user: `go install golang.org/x/tools/gopls@latest github.com/go-delve/delve/cmd/dlv@latest honnef.co/go/tools/cmd/staticcheck@latest golang.org/x/vuln/cmd/govulncheck@latest`.
-5. Fallback (`go.fallback_debian_package`): if go.dev can't be reached, install `golang-go` from **trixie-backports** (currently 1.27, versus 1.24 in trixie main), or from main if backports is off, and note the version.
+1. Resolve the version. With option `latest`, read `https://go.dev/dl/?mode=json` and take the first release with `stable: true`, then the file with `kind=archive`, `os=linux` and `arch=amd64`. The filename and sha256 come from the JSON.
+2. Download into the run's private download directory (architecture: "Files and downloads") and verify the sha256. Then extract into `/usr/local/go.kiln-new`, and swap: rename `/usr/local/go` to `go.kiln-old`, `go.kiln-new` to `go`, and remove `go.kiln-old`. That has the same result as go.dev/doc/install's `rm -rf` + extract, but an interruption never leaves the machine with no Go. Leftover `.kiln-new`/`.kiln-old` directories are removed on the next run. Skip this sub-step when `/usr/local/go/VERSION` already starts with the resolved version.
+3. `/etc/profile.d/kiln-go.sh`: `export PATH=/usr/local/go/bin:$PATH:$HOME/go/bin`. `/usr/local/go/bin` goes **first** so it wins over `/usr/bin/go` if `golang-go` is also installed. The same lines go in `<home>/.bashrc.d/50-kiln-go.sh`, for terminals that aren't login shells.
+4. As the user, **four separate** runs of `/usr/local/go/bin/go install <path>@latest`, for:
+   - `golang.org/x/tools/gopls`;
+   - `github.com/go-delve/delve/cmd/dlv`;
+   - `honnef.co/go/tools/cmd/staticcheck`;
+   - `golang.org/x/vuln/cmd/govulncheck`.
 
-**Check:** `/usr/local/go/bin/go version` matches the resolved version, and the tools exist in `~/go/bin`.
+   One `go install` can't take several modules ("all arguments must refer to packages in the same module at the same version"). Each tool is skipped if `<home>/go/bin/<tool>` exists, and the option "update tools" re-runs them.
+5. Fallback (option on): if go.dev can't be reached, install `golang-go` from **trixie-backports** (1.27), or from main (1.24) if backports is off, and note the version. Run `go install` with `GOTOOLCHAIN=local`. Debian keeps `GOTOOLCHAIN=auto`, so a tool needing a newer Go would otherwise try to download a toolchain from the same network that just failed. Skip, with a note, any tool whose `go` directive is newer than the installed Go.
+
+**Check:** `/usr/local/go/bin/go version` matches the resolved version (or, with the fallback, `golang-go` is installed), and the four tools exist in `<home>/go/bin`.
 
 ---
 
@@ -531,16 +877,26 @@ LAN-only via the firewall's `kiln-lan` zone (`rdp` service).
 
 **ID** `firmware-updates` · hardware · depends: apt-sources
 
-**Applies:** always. UEFI is recommended for most updates.
+**Applies:** always. UEFI capsule updates need an ESRT and an ESP at `/boot/efi`, `/boot` or `/efi`. Without them, only non-UEFI devices can update.
 
-**Actions:** install `fwupd`. Then `fwupdmgr refresh --force`, `fwupdmgr get-updates` (exit code 2 = nothing to do, verify), and `fwupdmgr update -y --no-reboot-check` (verify the flags). Add a note: "some firmware updates apply at the next reboot", and add a reboot reason if any were staged.
+**Actions** (fwupd 2.0.20; flags and exit codes checked in the source, since the man page leaves many out). **This step can never reboot the machine.** With `--no-reboot-check` (and with stdin not a TTY, which kiln guarantees), fwupdmgr returns before its "Restart now?" prompt; `-y` doesn't apply to that prompt; and the only reboot path, logind `Reboot`, goes through that prompt.
+1. Install `fwupd fwupd-amd64-signed udisks2`. The signed EFI binary is needed under Secure Boot. The LVFS remote is enabled by default on Debian.
+2. `fwupdmgr refresh --force`.
+   - Exit 0 is OK.
+   - Exit 101 means the network is unreachable: the step is skipped with a note.
+   - Without `--force`, recent metadata returns 2.
+3. `fwupdmgr get-updates --json`. Exit 0 means updates are available. Exit 2 means nothing to do: stop here, `done`.
+4. `fwupdmgr update -y --no-reboot-check --no-device-prompt`.
+   - Exit 0 or 2 is OK.
+   - Anything else becomes a note, not a failure (for example "on battery", or a device that refuses).
+5. If `fwupdmgr check-reboot-needed --json` exits 0, add the reboot reason "firmware update staged".
 
-**Check:** fwupd is installed and `get-updates` reports none.
+**Check:** fwupd is installed, and either the last run's update returned 0 or 2, or a reboot is pending. `get-updates` is deliberately not the check, because a device whose update can never apply would otherwise keep the step "not done" forever.
 
 ---
 
 ## 25. summary
 
-**ID** `summary` · always runs
+**ID** `summary` · always runs · implemented as the runner's final phase, after the end-of-run tasks (not a registered step; D42 implementation notes)
 
-**Actions:** for each step, show done/unchanged/failed/skipped and why. Show the collected notes. Reboot needed: yes/no + reasons. The wizard offers a reboot and never reboots on its own. Write `/var/log/kiln-summary.txt` (0644, no secrets), the full log at `/var/log/kiln.log` (0600), and `/etc/kiln/state.json` (0600: this run's choices, battery result, power manager; never secrets). A generated secret was already shown once by the remote-desktop step. The summary names its file.
+**Actions:** for each step, show done/unchanged/failed/skipped and why. Show the collected notes. Reboot needed: yes/no + reasons. The wizard offers a reboot and never reboots on its own. "Reboot now" first flushes and fsyncs `state.json`, the summary and the log, restores the runtime masks, and **stops kiln's own inhibitor** (it blocks shutdown), and only then runs `systemctl reboot`. Before writing the summary, kiln runs the end-of-run tasks: the deferred needrestart pass and the restore of automatic updates and PackageKit (D41). Write `/var/log/kiln-summary.txt` (0644, no secrets), the full log at `/var/log/kiln.log` (0600), and `/etc/kiln/state.json` (0600: this run's choices, battery result, power manager; never secrets). A generated secret was already shown once by the remote-desktop step. The summary names its file.

@@ -10,6 +10,7 @@ Implement the catalog step `$ARGUMENTS`. This project has **no tests**. Correctn
    - if it's **V** in `debian13-notes.md` and was checked less than 30 days ago, use it;
    - otherwise, check it now against a current primary source (packages.debian.org/trixie, manpages.debian.org/trixie, sources.debian.org, release notes, upstream docs), and record the URL and date in `debian13-notes.md`;
    - if it can't be verified, stop and ask. Never write code from memory.
+   - If the catalog entry contains "(proposed: Pn)", or relies on a decision with **Status: proposed** in `docs/decisions.md`, stop and ask the owner to decide it first. If implementing reveals a choice the catalog doesn't settle, present options instead of picking one.
 3. Look at one or two steps already in `internal/steps/` and follow their structure.
 4. Create `internal/steps/<id>/`:
    - `ID`, `Title`, `Category`, `DependsOn` and `Applies` exactly as in the catalog. Not-applicable reasons are plain language and cover hardware and installer choices (GNOME or none, SSH server or none).

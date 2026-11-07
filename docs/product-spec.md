@@ -37,8 +37,7 @@ The owner is always physically present. kiln isn't designed to be run over SSH. 
 | `kiln plan [--skip a,b]` | Prints the plan for this machine using defaults and last run's choices. Same code path as a real run. | No |
 | `kiln facts [--json]` | Prints what was detected (hardware and installer choices) | No |
 | `kiln battery status\|apply\|watch` | Battery charge-limit helper, also used by systemd units | `apply` and `watch` do |
-| `kiln thermal apply` | Re-applies the platform profile at boot (tuned machines only) | Yes |
-| `kiln kernel fallback` | Keeps the newest stable 6.12 kernel installed next to the backports kernel (weekly timer) | Yes |
+| `kiln thermal apply` | At boot on ThinkPads: validates the thinkfan config once fan control is active, then enables thinkfan | Yes |
 | `kiln mirrors bench [--apply]\|reset` | Benchmarks mirrors by throughput, or goes back to `deb.debian.org` | `--apply` and `reset` do |
 | `kiln secrets show [name]` | Root only. Prints a stored secret, such as the remote-desktop password. | No |
 
@@ -46,7 +45,8 @@ The wizard applies changes only on Linux, and only if `/etc/kiln/allow-apply` ex
 
 ## Defaults: everything on
 
-- Every kiln step and sub-option starts checked. That includes the NVIDIA driver, remote desktop, trixie-backports, the backports kernel, NetworkManager migration, zram, fail2ban, auto-updates, firmware updates, Flathub and the third-party repos.
+- Every kiln step and sub-option starts checked. That includes the NVIDIA driver, remote desktop, trixie-backports, NetworkManager migration, zram, fail2ban, auto-updates, firmware updates, Flathub and the third-party repos.
+- **One exception:** the backports kernel starts **off**. Every machine runs Debian's stock trixie kernel (6.12 LTS, kept on the latest version by normal upgrades) unless you select the backports kernel for that machine (D38).
 - A step that doesn't fit this machine stays checked but shows `not applicable: <reason>` and is skipped. The reason can be hardware (no NVIDIA GPU, no battery) or an installer choice (no GNOME, no SSH server).
 - To turn things off quickly, toggle a single item, toggle a whole category, or filter by text.
 - "On by default" doesn't mean reckless. Network migration, SSH and firewall changes are validated first, checked after applying, and reverted automatically if the check fails.

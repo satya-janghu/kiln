@@ -25,10 +25,10 @@ After the first run, the binary is already installed, so later runs are just `su
 1. The whole body sits inside `main() { ... }; main "$@"`, so a truncated download runs nothing.
 2. It uses `set -euo pipefail`. It requires root (`id -u` = 0). Otherwise it prints both one-liners and exits.
 3. It checks `/etc/os-release` for `ID=debian` and `VERSION_ID="13"`, and checks that `dpkg --print-architecture` is `amd64`.
-4. It picks a downloader: `wget` if present, else `curl`, else it fails with "Install wget first: apt install wget".
-5. It downloads `https://github.com/satya-janghu/kiln/releases/latest/download/kiln_linux_amd64.tar.gz` and `.../checksums.txt` into a `mktemp -d` directory under `/var/tmp`. Then it verifies them with `sha256sum --ignore-missing -c`. On a mismatch it stops.
+4. It picks a downloader: `wget` if present, else `curl`, else it fails with "Install wget first: apt install wget". wget and `ca-certificates` are both Priority standard, so they're absent if the installer's "standard system utilities" task was unticked. If HTTPS verification fails, the message says to run `apt install ca-certificates`.
+5. It downloads `https://github.com/satya-janghu/kiln/releases/latest/download/kiln_linux_amd64.tar.gz` and `.../checksums.txt` into `tmp=$(mktemp -d /var/tmp/kiln.XXXXXX)` (removed by a `trap` on exit). Then it runs `cd "$tmp" && sha256sum --ignore-missing -c checksums.txt`. It must run inside that directory, because checksums.txt holds bare file names. If nothing matched, coreutils 9.7 prints "no file was verified" and exits non-zero, so a missing or renamed archive also stops the install.
 6. It installs to `/usr/local/bin/kiln` (0755) and creates `/etc/kiln/` (0755) and `/etc/kiln/allow-apply`.
-7. If `/dev/tty` is readable, it runs `exec /usr/local/bin/kiln "$@" < /dev/tty`. The script itself arrived on stdin, so the wizard has to read the keyboard from the TTY instead.
+7. If `{ : </dev/tty; } 2>/dev/null` succeeds, it runs `exec /usr/local/bin/kiln "$@" </dev/tty`. The script itself arrived on stdin, so the wizard has to read the keyboard from the TTY instead. Don't test `[ -r /dev/tty ]`: the device node is mode 0666, so that test is true even when there is no controlling terminal; only actually opening it tells.
 8. If there's no TTY, it prints "kiln was installed. Run `sudo kiln` from a terminal." and exits 0.
 
 ## Releases (GoReleaser v2)

@@ -3,7 +3,12 @@ name: ci
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -16,6 +21,9 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
 
       - name: Build (linux/amd64 static binary)
         run: make build

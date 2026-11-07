@@ -25,6 +25,12 @@
    - **Not-applicable logic.** Cover every hardware and installer combination: GNOME or none, SSH server or none, laptop or desktop, AMD or Intel or NVIDIA.
    - **No mutation outside `sys.System`,** and no `bash -c` with interpolation.
    - **Secrets never reach** argv, logs or the summary.
+   - **Ordering and concurrency** (architecture: "Process model"):
+     - each action waits for its process to exit before the next one starts;
+     - "started" is never treated as "ready": checks poll until a deadline;
+     - nothing starts a background package job mid-run;
+     - shared state takes its lock;
+     - an interruption at every action leaves something the next run can repair.
 4. **Cross-cutting audit** (`/audit`): a full pass over all code and docs. It looks for drift between the catalog and the code, between the catalog and the notes, and between the options reference and the code. It also re-checks every **V** fact older than 30 days, plus concurrency issues, error handling, resource leaks, and TUI behavior at 80x24, at wide sizes, and on the Linux console.
 5. **Package list check** (`/check-packages`): every package any step can declare must exist in its stated suite and component. Check it against packages.debian.org, or the vendor repo's index for Docker and the GitHub CLI.
 
@@ -32,7 +38,7 @@
 
 Reviews can't catch everything a real machine might do. These features stay in the design for that reason:
 - **The review screen** shows the exact plan before anything changes. It comes from the same code path as the real run.
-- **Backups:** `.kiln-bak` copies of every file kiln changes.
+- **Backups:** copies of every file kiln changes, in `/var/lib/kiln/backup/`.
 - **Verify, then revert** for network, SSH and firewall changes, plus an interrupted-change prompt on the next start.
 - **A failed step never stops the run,** and the summary says what to do next.
 - **A full log** in `/var/log/kiln.log`.
@@ -52,35 +58,36 @@ kiln is ready for production when all of the following hold:
 
 | Step | Status | Reviewed at (date / commit) | Notes |
 |---|---|---|---|
-| scaffold (CLI tree, Makefile, lint config, CI) | implemented | | M0. Commands are stubs that name their milestone. |
-| preflight | not started | | |
-| sudo | not started | | |
-| apt-sources | not started | | |
-| mirrors | not started | | |
-| upgrade | not started | | |
-| firmware-packages | not started | | |
-| kernel | not started | | |
-| network-migration | not started | | |
-| multimedia | not started | | |
-| repos | not started | | |
-| devtools | not started | | |
-| system | not started | | |
-| power | not started | | |
-| thermal | not started | | |
-| battery | not started | | |
-| firewall | not started | | |
-| ssh | not started | | |
-| fail2ban | not started | | |
-| docker | not started | | |
-| cockpit | not started | | |
-| remote-desktop | not started | | |
-| autoupdates | not started | | |
-| node | not started | | |
-| python | not started | | |
-| go | not started | | |
-| firmware-updates | not started | | |
-| summary | not started | | |
-| wizard (TUI) | not started | | |
-| install.sh | not started | | |
+| scaffold (CLI tree, Makefile, lint config, CI) | implemented | | |
+| engine (sys, apt, facts, options, state, runner, revert, app, cli) | implemented | | |
+| preflight | implemented | | |
+| sudo | implemented | | |
+| apt-sources | implemented | | |
+| mirrors | implemented | | |
+| upgrade | implemented | | |
+| firmware-packages | implemented | | |
+| kernel | implemented | | |
+| network-migration | implemented | | |
+| multimedia | implemented | | |
+| repos | implemented | | |
+| devtools | implemented | | |
+| system | implemented | | |
+| power | implemented | | |
+| thermal | implemented | | |
+| battery | implemented | | |
+| firewall | implemented | | |
+| ssh | implemented | | |
+| fail2ban | implemented | | |
+| docker | implemented | | |
+| cockpit | implemented | | |
+| remote-desktop | implemented | | |
+| autoupdates | implemented | | |
+| node | implemented | | |
+| python | implemented | | |
+| go | implemented | | |
+| firmware-updates | implemented | | |
+| summary | implemented | | |
+| wizard (TUI) | implemented | | |
+| install.sh | implemented | | |
 
 Status values: `not started` → `implemented` → `reviewed` (no open findings) → `signed off` (by the owner).

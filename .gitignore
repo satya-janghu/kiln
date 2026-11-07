@@ -1,3 +1,4 @@
 /dist/
 /kiln
-*.kiln-bak
+/site/i
+/site/install.sh

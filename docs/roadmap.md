@@ -13,7 +13,7 @@ There are no tests. Each milestone ends with a clean `make build lint vuln`, an 
 
 ## M1: Engine
 
-- `sys.System` (Real + Recorder), the typed actions, `fileio.WriteManaged`, and the `apt` helper.
+- `sys.System` (Real + Recorder), the typed actions, `sys.System.WriteFile (managed write)`, and the `apt` helper.
 - The runner: events, skipping dependents, the summary.
 - `internal/revert` and `internal/state`.
 - The `facts` package, covering hardware and installer choices.
@@ -42,7 +42,6 @@ The rest of the catalog, in catalog order, each with Check, Plan and Apply, plus
 - battery ladder;
 - mirror bench;
 - thermal;
-- kernel fallback;
 - secrets.
 
 ## M4: Distribution

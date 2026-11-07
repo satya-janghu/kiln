@@ -6,6 +6,26 @@ Built with Bubble Tea v2, Bubbles v2, Lip Gloss v2 and Huh (for forms). Versions
 - keys arrive as `tea.KeyPressMsg`;
 - Lip Gloss has no implicit adaptive colors.
 
+## Look: Windows XP Setup (D42)
+
+The owner asked for the look of the Windows XP text-mode installer. It maps cleanly onto the Linux console's 16 colors, which is where kiln usually runs.
+
+| Element | XP Setup | kiln (16-color / truecolor) |
+|---|---|---|
+| Screen background | solid blue | ANSI blue `4` / `#0000AA`, filling the whole terminal |
+| Title | "Windows XP Professional Setup", top-left, with a double rule underneath | "kiln Setup" + a `═` rule (console: `=`) as wide as the title, light grey `7` / `#AAAAAA` |
+| Body text | light grey; key words brighter | light grey `7`; emphasis bright white `15`; warnings bright yellow `11` |
+| Panels | double-line frame | double-line border `╔═╗║╚╝` (console set: `+=+|`), light grey on blue |
+| Progress bar | yellow fill inside a single-line frame, percentage above | bright yellow `11` fill on blue inside a single-line frame, percentage centred above |
+| Selected list row | inverse | light grey `7` background, blue `4` text |
+| Status bar | full-width light grey bar, black text, right part after `│` showing the current file | light grey `7` background, black `0` text. Left: key hints in XP style (`ENTER=Continue  ESC=Back  F3=Quit`). Right, after `│`: the current action, e.g. `Installing: docker-ce` |
+| Errors | white text on blue | bright white `15` with a `!!` marker; failed steps in bright red `9` |
+
+Rules:
+- The whole screen is painted blue: every cell, not just the text, so there are no terminal-colored gaps.
+- Keys follow XP Setup as well as the usual ones: `F3` quits (with the same confirmation as `ctrl+c`), and `ENTER` continues.
+- No other colors. Light and dark terminal backgrounds don't matter, because kiln paints its own background.
+
 ## Where it runs
 
 The usual place is the **Linux text console** of a freshly installed machine (`TERM=linux`), because the first run often happens before anyone logs into a desktop. On GNOME machines it can also run later in GNOME Terminal. Both must look right.
@@ -19,7 +39,7 @@ The usual place is the **Linux text console** of a freshly installed machine (`T
 - **Console set** (when `TERM` is `linux`, `vt100` or `dumb`, or `KILN_ASCII=1` is set): status markers `[ ]` `[x]` `ok` `==` `!!` `--` `>>`, spinner `| / - \`, and plain ASCII box borders.
 - **Rich set** (any other terminal): `✓ ✗ = – ·`, rounded Lip Gloss borders, and a dot spinner.
 
-Choosing light or dark colors uses `tea.BackgroundColorMsg` with `lipgloss.LightDark`. On the Linux console, assume a dark background.
+Light or dark detection isn't needed: kiln paints every cell with its own blue background (D42).
 
 ## Responsive layout
 
@@ -44,13 +64,18 @@ Other layout rules:
 | `enter` | next / open |
 | `esc` | back (your edits are kept) |
 | `?` | help for this screen |
-| `ctrl+c` | quit. During a run it asks "Stop after the current step?" and never kills apt halfway through an install |
+| `F3` | quit (XP Setup style), same as `ctrl+c` |
+| `ctrl+c` | quit. During a run it asks "Stop after the current step?" and never kills apt halfway through an install. Closing the terminal doesn't stop a run: kiln keeps going in its own scope and logs to `/var/log/kiln.log`, and the next `sudo kiln` shows the result |
 
 ## Screens
 
-### 0. Interrupted change (only if `state.json` has a `pending` entry)
+### 0. Before anything else
 
-"A network change didn't finish last time. Revert it now? [y/n]". This screen is shown before anything else.
+These checks run in this order, each only when it applies:
+1. **Another kiln is running:** "kiln is already running (pid N). [l] view its log  [q] quit". Nothing else is possible.
+2. **Interrupted change** (`state.json` has `pending`): "A network change didn't finish last time. Revert it now? [y/n]".
+3. **Interrupted run:** "The last run stopped during *Docker* (14:22, power lost?). kiln will repair the package system and then run again; every step is safe to repeat." If dpkg was interrupted, the repair runs with its own progress view.
+4. **On battery below 30%:** "Plug in the charger. A run that loses power while installing packages can break the system. [c] continue anyway".
 
 ### 1. Welcome / facts
 
