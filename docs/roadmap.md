@@ -13,7 +13,9 @@ There are no tests. Each milestone ends with a clean `make build lint vuln`, an 
 
 **Stopped at:** the owner reset the direction (D54). kiln must be a one-time tool that leaves nothing running behind, with fewer questions. Nothing has been implemented for D54 yet.
 
-**Next session, in order:**
+**2026-11-08:** the owner chose **B, a small rewrite** (D54). The next step is agreeing on the scope (D55). The list below predates that choice and is superseded by it.
+
+**Old next-session list (superseded):**
 1. Ask the owner: approach A (one-shot, strip persistence) or B (rewrite much smaller). See D54.
 2. Implement that approach, plus the D54 answers marked "still applies":
    - write `Port 22` when another sshd file sets a Port;

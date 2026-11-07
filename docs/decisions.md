@@ -6,7 +6,7 @@ Where an older entry conflicts with D54, D54 wins.
 
 **Scope and direction**
 - kiln is a one-time setup tool for fresh Debian 13 installs; it should leave nothing running and ask few questions (D54).
-- **Open: approach A (one-shot, strip persistence; recommended) or B (rewrite much simpler) (D54).**
+- **Approach B: a small rewrite (D54, decided 2026-11-08).** Its scope, which steps and options survive, is proposed in D55.
 - No profiles or headless mode; the wizard is the only way to apply (D27, D33).
 - Run at the console in person; risky changes are checked and reverted in-process (D28).
 - TUI: responsive, console-safe (D32), Windows XP text-mode Setup look (D42).
@@ -40,13 +40,7 @@ Where an older entry conflicts with D54, D54 wins.
 - Review to sign-off, no tests (D30); static analysis (D34); read-only field check (D46).
 - Plan and run share one path (D2). Backups under `/var/lib/kiln/backup/` (D36). Process model (D41).
 
-**D54 answers that still apply** (recorded, not implemented):
-- fail2ban skipped when SSH is installed but the ssh step is unticked;
-- write `Port 22` when another sshd file sets a Port;
-- thinkfan AMD ThinkPads only, and no longer depends on the power step;
-- mirror test skips GeoDNS mirrors, caps in-country at 10;
-- startup internet check: HTTPS to deb.debian.org and github.com, 5 s each (the catalog now describes today's code, which differs).
-- "Add logrotate" conflicts with "leave nothing behind"; unresolved.
+**D54 answers:** most were re-run edge cases and are moot under the rewrite (2026-11-08). What survives depends on the D55 scope.
 
 ## How to read this log
 
@@ -401,7 +395,7 @@ Observations are in debian13-notes.md, "Field observations".
 
 ### D54 · 2026-11-07 · Direction reset: kiln is a one-time setup tool
 
-**Status: decided (intent), approach proposed.** This is your direction from the end of the 2026-11-07 session. Read it before any other entry: where an older entry conflicts with it, this one wins.
+**Status: decided.** You chose approach **B (small rewrite)** on 2026-11-08; the scope is proposed in D55. This is your direction from the end of the 2026-11-07 session. Read it before any other entry: where an older entry conflicts with it, this one wins.
 
 **What you said kiln is (decided):**
 - A **one-time** tool. You run it once on a fresh Debian install and never have to deal with it again. It is not something that lives on the machine, keeps running, or gets re-run to manage the system.
@@ -423,15 +417,15 @@ Observations are in debian13-notes.md, "Field observations".
   - the `kiln mirrors|battery|thermal|secrets` subcommands.
 - Everything else kiln writes is ordinary Debian configuration that needs no kiln afterwards: apt sources, the sshd drop-in, the fail2ban jail, logind and journald drop-ins, the tuned profile choice, the update timers, the bashrc.d drop-ins and so on. That part is the job.
 
-**Approaches (proposed; your call next session):**
-- **A. One-shot, leave nothing behind (recommended).** Keep the wizard and the server/GNOME modularity, but strip the persistence:
+**Approaches (you chose B on 2026-11-08):**
+- **A. One-shot, leave nothing behind.** Keep the wizard and the server/GNOME modularity, but strip the persistence:
   - no kiln units or helpers: the battery limit becomes a plain udev rule, the software charge-limit fallback (it needs a daemon) and the thinkfan boot helper go;
   - no saved choices, no revert prompt, no subcommands;
   - at the end kiln deletes its binary and `/etc/kiln`, leaving only the summary in `/var/log`;
   - steps still skip what's already done, so a run that failed halfway can simply be run again.
 
   Mostly deletions; most of today's verified and field-tested work carries over.
-- **B. Rewrite much simpler.** A small tool (or a bash script with a server/GNOME switch) with far fewer steps and options. Smallest result; much of the work starts over.
+- **B. Rewrite much simpler (chosen).** A small tool (or a bash script with a server/GNOME switch) with far fewer steps and options. Smallest result. The verified facts (debian13-notes.md) and config contents carry over; the framework and the field testing don't.
 
 **Your answers in the last review round (2026-11-07), recorded but not implemented**, because most of them only matter if kiln is re-run:
 
@@ -441,17 +435,61 @@ Observations are in debian13-notes.md, "Field observations".
 | remove kiln's old NOPASSWD sudo file when passwordless is switched off later | remove it | moot (no later runs) |
 | remove GitHub CLI's apt source when switching gh to Debian's later | remove them | moot |
 | "No" to "revert the unfinished change?" | keep the change, stop asking | moot if the prompt goes (A) |
-| write `Port 22` when another sshd file sets a Port | write it | still applies |
+| write `Port 22` when another sshd file sets a Port | write it | moot: a fresh install has no other Port setting (2026-11-08) |
 | thinkfan on Intel ThinkPads | AMD only (no change) | still applies |
 | rotate `/var/log/kiln.log` | add logrotate | conflicts with "leave nothing behind" |
 | mirror test: skip cloud-only (GeoDNS) mirrors, cap at 10 in-country | yes | still applies |
 | thinkfan no longer depends on the power step | yes | still applies |
 | remove battery helpers when the battery step is unticked later | yes | moot under A (no helpers) |
 | warn when backports is switched off under a backports kernel | yes | moot |
-| startup internet check: the catalog wins (HTTPS to deb.debian.org and github.com, 5 s each) | the catalog | still applies |
+| startup internet check: the catalog wins (HTTPS to deb.debian.org and github.com, 5 s each) | the catalog | moot: apt already fails clearly with no network (2026-11-08) |
 | the remaining mechanical D43 items | accept them | D43 is now decided |
 
 Earlier the same day you also decided D50–D52 (no firewall, remote desktop, network migration, SSH keys or TLP; balanced power; no mirror neighbours; non-free always). Those stand, and they already point the same way: less kiln, more Debian defaults.
+
+### D55 · 2026-11-08 · Rewrite scope
+
+**Status: proposed** (my recommendation, 2026-11-08; waiting for your cuts).
+
+**Shape:** Go, one static binary, the same one-liner install. Three screens: a checklist, progress with live output, and a summary. The only choices are the step checkboxes; every value below is fixed. GNOME-only items appear only when GNOME is detected. Nothing is saved, nothing keeps running, and kiln leaves nothing of its own behind except one log of the run (`/var/log/kiln.log`). If a run fails halfway, running it again is safe, because apt installs and file writes are naturally repeatable. There is no special machinery for that.
+
+**Keep (the job):**
+1. sudo for your user, passwordless.
+2. apt sources in deb822: main, contrib, non-free, non-free-firmware, security, updates, backports.
+3. Full upgrade.
+4. Firmware and CPU microcode for the detected hardware.
+5. System: zram swap, a 500M journal cap, raised inotify limits, timesyncd. The hostname and timezone stay as the installer set them.
+6. SSH: install the server, allow password logins for your user and root, and give root your user's password if root has none. Port 22, MaxAuthTries 4. `sshd -t` runs before the reload.
+7. fail2ban for SSH (1 h ban, increasing, 5 tries).
+8. Automatic updates: every package, every 12 h, never an automatic reboot (D40).
+9. Always on: no sleep, lid ignored; GNOME's no-suspend settings locked.
+10. Power profile balanced: power-profiles-daemon with GNOME, tuned without.
+11. Battery stop at 80%: one plain udev rule where the kernel offers `charge_control_end_threshold`; otherwise a note.
+12. Docker, with log rotation of 10 MB × 3.
+13. Cockpit.
+14. Dev tools: gh (GitHub's repo), node through nvm, the Python venv with uv, Playwright Chromium, ruff, pre-commit and httpie, and Go (latest) with its tools.
+15. GNOME only: codecs, VA-API, Flathub, Google Chrome.
+16. NVIDIA, picked automatically by GPU: Turing or newer gets NVIDIA's repo, Maxwell to Ada gets Debian's 550, and anything older stays on nouveau. With Secure Boot, MOK enrollment is queued and its password is shown once on the last screen.
+
+**Drop:**
+- mirror benchmarking (use deb.debian.org, Debian's CDN);
+- the battery ladder, software fallback and helper services;
+- the thermal check and thinkfan;
+- the backports kernel step;
+- DVD playback (libdvd-pkg);
+- fwupd firmware updates (you earlier wanted these every run);
+- every sub-option and free-text field.
+
+**Drop (machinery):**
+- saved choices and `/etc/kiln`;
+- "unchanged" detection;
+- the plan preview and review screen;
+- revert snapshots and the revert prompt;
+- subcommands;
+- the systemd scope, apt-daily masking and the sleep inhibitor;
+- the allow-apply file. In its place: refuse unless the system is Debian 13 amd64 and kiln runs as root, then a confirm before starting.
+
+**Kept from the old safety rules:** apt runs non-interactive and waits for the dpkg lock, because unattended-upgrades often runs on first boot. Large downloads go to `/var/tmp`.
 
 ## Proposals from the second verification pass
 
@@ -483,4 +521,4 @@ You accepted all of these on 2026-11-07 as written (the "current text" option), 
 
 1. **Closed (D50):** Wi-Fi power saving on always-on machines stays at Debian's default. (The test box showed 19–572 ms latency and 6.7% loss with power saving on, 3–7 ms and none with it off; the proposed NM `wifi.powersave = 2` option was not adopted.)
 
-Open: approach A or B (D54).
+Open: the rewrite's scope (D55, proposed).
