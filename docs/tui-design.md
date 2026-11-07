@@ -93,7 +93,7 @@ These checks run in this order, each only when it applies:
   enter continue   f all facts   q quit
 ```
 
-If the session is over SSH, the Warnings line says: "You're connected over SSH. The network and SSH steps may disconnect you; kiln is meant to run at the machine."
+If the session is over SSH, the Warnings line says: "You're connected over SSH. The SSH step may disconnect you; kiln is meant to run at the machine."
 
 ### 2. Step checklist
 
@@ -129,7 +129,7 @@ Press `o` on an item to open a Huh form for that step's options, for example:
 - update scope;
 - mirror country.
 
-Forms validate as you type: hostname rules, port range, and "GitHub user has no public keys".
+Forms validate each field (for example hostname rules and port ranges) and show the error under it.
 
 ### 4. Review plan
 
@@ -151,7 +151,7 @@ The run screen shows:
 - **Step list**, with status markers (pending, running, done, unchanged, failed, skipped).
 - **Live log pane**, which shows the current command's output. `PgUp`/`PgDn` scroll it, and `l` makes the log full screen.
 - **Progress bar on top**, with steps done out of the total and the current step's elapsed time.
-- **Status line for risky steps**, for example "Checking network after the switch… ok" or "…failed, reverted".
+- **Status line for risky steps**, for example "Checking SSH after the change… ok" or "…failed, reverted".
 
 ### 6. Summary
 

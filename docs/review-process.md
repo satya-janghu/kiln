@@ -39,7 +39,7 @@
 `scripts/field-check.sh` is the one sanctioned way to collect evidence from a real Debian machine without changing it (D46). Copy it next to a kiln binary and run it as root (`sudo bash field-check.sh`, or `su - -c …` where sudo isn't installed yet). It records:
 - kiln's read-only commands: `facts`, `plan`, `battery status`, and `mirrors bench` without `--apply`;
 - whether every declared package has a candidate in that machine's sources;
-- the command outputs behind every **U** row in debian13-notes.md;
+- the command outputs behind any **U** row in debian13-notes.md (none are left; see the field observations);
 - Wi-Fi power saving and signal, plus suspend and lid events;
 - the battery, thermal and GPU sysfs attributes.
 
@@ -50,7 +50,7 @@ Everything goes into `/tmp/kiln-field-<hostname>.txt`, which is the only file it
 Reviews can't catch everything a real machine might do. These features stay in the design for that reason:
 - **The review screen** shows the exact plan before anything changes. It comes from the same code path as the real run.
 - **Backups:** copies of every file kiln changes, in `/var/lib/kiln/backup/`.
-- **Verify, then revert** for network and SSH changes, plus an interrupted-change prompt on the next start.
+- **Verify, then revert** for SSH changes, plus an interrupted-change prompt on the next start.
 - **A failed step never stops the run,** and the summary says what to do next.
 - **A full log** in `/var/log/kiln.log`.
 

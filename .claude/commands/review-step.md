@@ -14,7 +14,7 @@ Compare the code against the step's entry in `docs/steps-catalog.md`, the rules 
 - **Failure paths:** for each action that can fail, what state is the machine left in, and what does the summary tell the owner? Are dependent steps skipped?
 - **Revert** (risky steps): does the revert restore the exact previous files and service state? What happens if kiln dies between "apply" and "check" (the `pending` record)?
 - **Applicability matrix:** GNOME or none, SSH server or none, laptop or desktop, AMD, Intel or NVIDIA, Secure Boot on or off, backports on or off.
-- **Shared path:** all changes go through `action`s and `sys.System`. No direct `os.WriteFile`, no direct `exec.Command`, no `bash -c` with interpolation. Piped installers use only `a pinned `sys.Fetch` download run with `bash <file>` as the user`.
+- **Shared path:** all changes go through `action`s and `sys.System`. No direct `os.WriteFile`, no direct `exec.Command`, no `bash -c` with interpolation. Piped installers use only a pinned `sys.Fetch` download, run with `bash <file>` as the user.
 - **Files:** every write goes through `sys.System.WriteFile (managed write)`.
 - **apt:** non-interactive environment, confold/confdef, preseeded debconf, lock wait.
 - **Secrets:** never in argv, logs, the summary or `state.json`.

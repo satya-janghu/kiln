@@ -27,7 +27,7 @@
    - It ends with a summary and offers a reboot.
 5. *(Current code; under review per D54.)* Later runs on the same machine start with that machine's previous choices ticked. Re-running only fixes what drifted. Everything else reports "unchanged". The intent is a single run; re-running is only for finishing a run that failed partway.
 
-The owner is always physically present. kiln isn't designed to be run over SSH. If it detects an SSH session, it warns that the network and SSH steps may disconnect you, but it doesn't refuse.
+The owner is always physically present. kiln isn't designed to be run over SSH. If it detects an SSH session, it warns that the SSH step may disconnect you, but it doesn't refuse.
 
 ## Machines
 

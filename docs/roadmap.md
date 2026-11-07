@@ -17,12 +17,13 @@ There are no tests. Each milestone ends with a clean `make build lint vuln`, an 
 1. Ask the owner: approach A (one-shot, strip persistence) or B (rewrite much smaller). See D54.
 2. Implement that approach, plus the D54 answers marked "still applies":
    - write `Port 22` when another sshd file sets a Port;
-   - the startup internet check as the catalog says;
+   - the startup internet check: HTTPS to deb.debian.org and github.com, 5 s each, saying which failed (today's code: HTTP GET to deb.debian.org, HTTPS to github.com/robots.txt, 60 s);
    - mirror test: skip cloud-only mirrors and cap at 10 in-country;
    - thinkfan independent of the power step;
    - make the fail2ban catalog text match the code.
 3. Update the catalog, architecture and options reference to match. Then re-run the review for the steps that changed, and run kiln on the test box again (reinstalling Debian there is fine).
-4. Still open whichever approach is chosen:
+4. Found in the doc pass, not fixed yet: NVIDIA cards older than Maxwell (Kepler) that aren't in the open-module table are classed "pre-Turing" and offered Debian's 550 driver, which doesn't support them (`internal/steps/multimedia/nvidia.go` classify). They should be left on nouveau with a note.
+5. Still open whichever approach is chosen:
    - interruption drills;
    - a GNOME machine and the NVIDIA machines (RTX 2070 Super, GTX 970);
    - `make vuln` (install govulncheck on the Mac);

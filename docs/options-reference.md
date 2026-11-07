@@ -1,6 +1,6 @@
 # Options reference
 
-There are no profile files. Options are set in the wizard each time (the checklist plus the per-step option forms). Each option's starting value is the **built-in default** below, or what you chose on **this machine's last run** if there is one (stored in `/etc/kiln/state.json`). Press `d` in the checklist to reset to the defaults. **All defaults are "on".**
+There are no profile files. Options are set in the wizard (the checklist plus each step's option form). Each starts at the **built-in default** below, or at **this machine's last run** if there was one (`/etc/kiln/state.json`; under review in D54, since kiln is meant to run once). `d` in the checklist resets to the defaults. Every step and option defaults to **on**, except the backports kernel (D38), automatic reboot after updates, and the per-run "update Go tools".
 
 Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (default on). Only the options inside a step are listed here. The catalog describes what each one does.
 
@@ -8,7 +8,7 @@ Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (
 
 | Step | Option | Default | Values / notes |
 |---|---|---|---|
-| (all) | target user | detected | `SUDO_USER`, then the first UID ≥ 1000 with a login shell. It isn't an option: if none is found, preflight stops and says to create one with `adduser` |
+| (all) | target user | detected | `SUDO_USER`, then `PKEXEC_UID`, then the lowest UID ≥ 1000 with a login shell. Not an option: if none is found, preflight stops and says to create one with `adduser` |
 | sudo | passwordless sudo | on | on: `/etc/sudoers.d/90-<user>-nopasswd`; off: `/etc/sudoers.d/90-<user>` with a password rule (D45). Works without re-login either way |
 | apt-sources | trixie-backports | on | packages come from backports only when a step asks for them |
 | apt-sources | dpkg lock wait | 10 min | how long to wait for unattended-upgrades |
@@ -162,7 +162,7 @@ Additional cases:
 
 ## State file: `/etc/kiln/state.json`
 
-Root-owned, mode 0600, written at the end of every run (and when `pending` changes). It never holds secrets. Shape:
+Root-owned, 0600, written at the end of every run and whenever `pending` changes. Never holds secrets or per-run options. Shape:
 
 ```json
 {
@@ -176,10 +176,11 @@ Root-owned, mode 0600, written at the end of every run (and when `pending` chang
 }
 ```
 
-`pending` is non-null only while a risky change is in progress. It is `{ "step": "ssh", "backups": [...], "revert": "..." }`. Only options that differ from the defaults are stored in `choices`.
+`pending` is non-null only while a risky change (SSH) is in progress: `{ "step": "ssh", "desc": "...", "snapshots": { "<path>": "<tar or empty>" }, "restore": [["systemctl", "reload-or-restart", "ssh"]], "started": "..." }`. `choices` stores only options that differ from the defaults.
 
 ## Environment variables
 
-These are for debugging only. None of them is a preset:
-- `KILN_ASCII=1` forces the console glyph set.
+None of them is a preset.
+- `KILN_ASCII=1` forces the console glyph set (debugging).
 - `NO_COLOR` disables color.
+- Internal markers kiln sets for itself: `KILN_IN_SCOPE` (already re-executed into its systemd scope) and `KILN_PLAIN_SU` (started with plain `su`; kiln added the sbin directories to PATH).
