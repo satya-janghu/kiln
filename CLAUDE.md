@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Read this first: direction reset (2026-11-07, D54)
+
+The owner wants a **one-time setup tool**: run once per fresh Debian install, then never dealt with again. Its job is to install packages and write config (SSH included) the owner would otherwise type by hand on every homelab machine; the TUI and modularity exist only so it fits both desktop-less servers and GNOME installs. It must **not** become a persistent app: nothing of kiln should keep running or be needed afterwards. **Fewer questions and options are better; prefer Debian defaults; don't over-engineer.** The current code still has persistent parts (battery/ThinkPad helper units calling the binary, `/etc/kiln` and `/var/lib/kiln` state, re-run machinery, subcommands). The next session starts by asking the owner to choose approach A (strip persistence, one-shot) or B (rewrite smaller) from `docs/decisions.md` D54, and by implementing the D54 answers that still apply. Where the text below describes re-runs, saved choices or helpers, it describes today's code, not the intent.
+
 ## What this is
 
 `kiln` is a single static Go binary with a TUI. It takes a fresh **Debian 13 "trixie" amd64 bare-metal** install and makes it a configured, always-on machine, the Debian way: apt, deb822 sources, Debian package names and Debian defaults. The owner runs it **at the machine's own console** (physically present, not over SSH) right after the Debian installer finishes. Every time, the wizard is used to pick the options for that machine. There are no saved profiles and no headless mode.

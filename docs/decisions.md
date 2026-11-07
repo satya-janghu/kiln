@@ -9,6 +9,8 @@ Each entry has a date, the decision, why, and the alternatives considered. Super
 
 Proposals P1–P17 at the bottom are the choices I made on my own during the second verification pass.
 
+> **Start here (2026-11-07):** D54 resets the direction. kiln is a one-time setup tool that leaves nothing running behind; the approach (A or B in D54) is still to be chosen.
+
 ## Log
 
 ### D1 · 2026-11-07 · Dependency versions (verified against the Go module proxy)
@@ -398,7 +400,7 @@ Details I filled in, flagged for your review:
 
 ### D43 · 2026-11-07 · Implementation choices (to confirm)
 
-**Status: proposed.** These were decided while writing the code, because the catalog left them open or couldn't be implemented literally. Each one is applied in the code and listed here for you to confirm or change. **Forced** items are marked.
+**Status: decided** (you accepted the remaining items on 2026-11-07; D51 and D52 changed some, marked inline). Originally: **proposed.** These were decided while writing the code, because the catalog left them open or couldn't be implemented literally. Each one is applied in the code and listed here for you to confirm or change. **Forced** items are marked.
 
 **Dependencies (forced by the runner's rule that a failed or user-skipped dependency skips the step):**
 - **autoupdates depends only on apt-sources,** not on docker, devtools, repos or multimedia. Otherwise unticking Chrome would also turn off automatic updates. `origin=*` covers whatever repositories exist.
@@ -631,6 +633,60 @@ Field observations so far are in debian13-notes.md, "Field observations".
   - apt-sources checks `Signed-By` only on files modernize converted.
 - **mirrors:** `kiln mirrors bench --apply` and `reset` respect the apply gate (rule 1) and the run lock.
 - **Docs:** stale firewall and NetworkManager text was removed; new V rows for dpkg version comparison, tuned and ppd balanced, chpasswd and PCI Wi-Fi IDs.
+
+### D54 · 2026-11-07 · Direction reset: kiln is a one-time setup tool
+
+**Status: decided (intent), approach proposed.** This is your direction from the end of the 2026-11-07 session. Read it before any other entry: where an older entry conflicts with it, this one wins.
+
+**What you said kiln is (decided):**
+- A **one-time** tool. You run it once on a fresh Debian install and never have to deal with it again. It is not something that lives on the machine, keeps running, or gets re-run to manage the system.
+- Its whole job is to install the packages and set up the configuration you'd otherwise type by hand on every homelab machine, so you don't repeat the same commands half a dozen times. That includes configuring things like SSH.
+- It could have been a bash script. The TUI and the per-step modularity exist only so the same tool fits both Debian servers without a desktop and Debian installs where you chose GNOME.
+- **Fewer questions, fewer options.** Every extra question is a sign of over-engineering. Prefer Debian's defaults and the simplest behavior that does the job.
+- "kiln" is just the app's name, not a separate framework. A rename (for example to something plainly descriptive) is open and cheap.
+
+**How far today's code is from that (facts, from the code on 2026-11-07):**
+- **kiln keeps running after setup:**
+  - battery charge limit: `/etc/udev/rules.d/90-kiln-battery.rules`, `kiln-battery.service`, `kiln-battery.timer` (every 15 min), and `kiln-battery-watch.service`, all calling `/usr/local/bin/kiln battery …`;
+  - ThinkPads: `kiln-thinkfan-enable.service`, calling `kiln thermal apply` at boot.
+- **kiln keeps its own state:** `/etc/kiln/` (state.json with saved choices, allow-apply, secrets), `/var/lib/kiln/` (backups, pending reverts), `/var/log/kiln.log`.
+- **Machinery that only exists for re-runs:**
+  - saved choices pre-filled next time;
+  - "unchanged" reporting;
+  - the "revert the unfinished change?" prompt at the next start;
+  - handling for options changed between runs;
+  - the `kiln mirrors|battery|thermal|secrets` subcommands.
+- Everything else kiln writes is ordinary Debian configuration that needs no kiln afterwards: apt sources, the sshd drop-in, the fail2ban jail, logind and journald drop-ins, the tuned profile choice, the update timers, the bashrc.d drop-ins and so on. That part is the job.
+
+**Approaches (proposed; your call next session):**
+- **A. One-shot, leave nothing behind (recommended).** Keep the wizard and the server/GNOME modularity, but strip the persistence:
+  - no kiln units or helpers: the battery limit becomes a plain udev rule, the software charge-limit fallback (it needs a daemon) and the thinkfan boot helper go;
+  - no saved choices, no revert prompt, no subcommands;
+  - at the end kiln deletes its binary and `/etc/kiln`, leaving only the summary in `/var/log`;
+  - steps still skip what's already done, so a run that failed halfway can simply be run again.
+
+  Mostly deletions; most of today's verified and field-tested work carries over.
+- **B. Rewrite much simpler.** A small tool (or a bash script with a server/GNOME switch) with far fewer steps and options. Smallest result; much of the work starts over.
+
+**Your answers in the last review round (2026-11-07), recorded but not implemented**, because most of them only matter if kiln is re-run:
+
+| Question | Your answer | Under a one-time tool |
+|---|---|---|
+| fail2ban when SSH is installed but the ssh step is unticked | skip it (keep current) | still applies (catalog text to match) |
+| remove kiln's old NOPASSWD sudo file when passwordless is switched off later | remove it | moot (no later runs) |
+| remove GitHub CLI's apt source when switching gh to Debian's later | remove them | moot |
+| "No" to "revert the unfinished change?" | keep the change, stop asking | moot if the prompt goes (A) |
+| write `Port 22` when another sshd file sets a Port | write it | still applies |
+| thinkfan on Intel ThinkPads | AMD only (no change) | still applies |
+| rotate `/var/log/kiln.log` | add logrotate | conflicts with "leave nothing behind" |
+| mirror test: skip cloud-only (GeoDNS) mirrors, cap at 10 in-country | yes | still applies |
+| thinkfan no longer depends on the power step | yes | still applies |
+| remove battery helpers when the battery step is unticked later | yes | moot under A (no helpers) |
+| warn when backports is switched off under a backports kernel | yes | moot |
+| startup internet check: the catalog wins (HTTPS to deb.debian.org and github.com, 5 s each) | the catalog | still applies |
+| the remaining mechanical D43 items | accept them | D43 is now decided |
+
+Earlier the same day you also decided D50–D52 (no firewall, remote desktop, network migration, SSH keys or TLP; balanced power; no mirror neighbours; non-free always). Those stand, and they already point the same way: less kiln, more Debian defaults.
 
 ## Proposals from the second verification pass
 

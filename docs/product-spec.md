@@ -2,7 +2,17 @@
 
 ## One sentence
 
-`kiln` turns a fresh Debian 13 "trixie" amd64 bare-metal install into a configured, always-on machine in one sitting at its console, the Debian way (apt, deb822 sources, Debian package names, Debian defaults).
+`kiln` turns a fresh Debian 13 "trixie" amd64 bare-metal install into a configured, always-on machine in one sitting at its console, the Debian way (apt, deb822 sources, Debian package names, Debian defaults). **It's a one-time tool:** you run it once per machine and never deal with it again (D54).
+
+## What it is, in the owner's terms (D54)
+
+- Its job is to install the packages and write the configuration (SSH included) that would otherwise be typed by hand on every homelab machine.
+- It could have been a bash script. The TUI and per-step modularity exist only so one tool fits both Debian servers without a desktop and Debian installs with GNOME.
+- It must not turn into an app that lives on the machine: nothing of kiln should keep running, need re-running, or be needed to manage the system afterwards.
+- Fewer questions and options are better. Prefer Debian's defaults.
+- "kiln" is only the app's name.
+
+> **Pending (D54):** the code doesn't match this yet. It still installs battery and ThinkPad helpers that call the kiln binary, keeps state in `/etc/kiln` and `/var/lib/kiln`, and carries re-run machinery (saved choices, the revert prompt, subcommands). Whether to strip that (approach A) or rewrite smaller (approach B) is the owner's next decision. Sections below that describe re-runs reflect the current code, not the intent.
 
 ## How it's used
 
@@ -15,7 +25,7 @@
    - You review the exact plan.
    - It runs with live progress.
    - It ends with a summary and offers a reboot.
-5. Later runs on the same machine start with that machine's previous choices ticked. Re-running only fixes what drifted. Everything else reports "unchanged".
+5. *(Current code; under review per D54.)* Later runs on the same machine start with that machine's previous choices ticked. Re-running only fixes what drifted. Everything else reports "unchanged". The intent is a single run; re-running is only for finishing a run that failed partway.
 
 The owner is always physically present. kiln isn't designed to be run over SSH. If it detects an SSH session, it warns that the network and SSH steps may disconnect you, but it doesn't refuse.
 

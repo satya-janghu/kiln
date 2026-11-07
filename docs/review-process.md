@@ -71,32 +71,32 @@ kiln is ready for production when all of the following hold:
 |---|---|---|---|
 | scaffold (CLI tree, Makefile, lint config, CI) | implemented | | |
 | engine (sys, apt, facts, options, state, runner, revert, app, cli) | implemented | | |
-| preflight | implemented | | |
-| sudo | implemented | | |
-| apt-sources | implemented | | |
-| mirrors | implemented | | |
-| upgrade | implemented | | |
-| firmware-packages | implemented | | |
-| kernel | implemented | | |
+| preflight | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| sudo | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| apt-sources | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| mirrors | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| upgrade | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
+| firmware-packages | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| kernel | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
 | network-migration | removed (D52) | | |
-| multimedia | implemented | | |
-| repos | implemented | | |
-| devtools | implemented | | |
-| system | implemented | | |
-| power | implemented | | |
-| thermal | implemented | | |
-| battery | implemented | | |
+| multimedia | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| repos | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
+| devtools | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| system | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
+| power | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| thermal | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| battery | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
 | firewall | removed (D50) | | |
-| ssh | implemented | | |
-| fail2ban | implemented | | |
-| docker | implemented | | |
-| cockpit | implemented | | |
+| ssh | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| fail2ban | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| docker | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| cockpit | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
 | remote-desktop | removed (D50) | | |
-| autoupdates | implemented | | |
-| node | implemented | | |
-| python | implemented | | |
-| go | implemented | | |
-| firmware-updates | implemented | | |
+| autoupdates | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
+| node | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| python | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
+| go | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
+| firmware-updates | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
 | summary | implemented | | |
 | wizard (TUI) | implemented | | |
 | install.sh | implemented | | |
