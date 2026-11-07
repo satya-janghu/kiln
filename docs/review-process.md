@@ -34,6 +34,17 @@
 4. **Cross-cutting audit** (`/audit`): a full pass over all code and docs. It looks for drift between the catalog and the code, between the catalog and the notes, and between the options reference and the code. It also re-checks every **V** fact older than 30 days, plus concurrency issues, error handling, resource leaks, and TUI behavior at 80x24, at wide sizes, and on the Linux console.
 5. **Package list check** (`/check-packages`): every package any step can declare must exist in its stated suite and component. Check it against packages.debian.org, or the vendor repo's index for Docker and the GitHub CLI.
 
+## Field check (read-only, on a real machine)
+
+`scripts/field-check.sh` is the one sanctioned way to collect evidence from a real Debian machine without changing it (D46). Copy it next to a kiln binary and run it as root (`sudo bash field-check.sh`, or `su - -c …` where sudo isn't installed yet). It records:
+- kiln's read-only commands: `facts`, `plan`, `battery status`, and `mirrors bench` without `--apply`;
+- whether every declared package has a candidate in that machine's sources;
+- the command outputs behind every **U** row in debian13-notes.md;
+- Wi-Fi power saving and signal, plus suspend and lid events;
+- the battery, thermal and GPU sysfs attributes.
+
+Everything goes into `/tmp/kiln-field-<hostname>.txt`, which is the only file it writes. The results justify flipping U rows to V (with "observed on <machine>, <date>" as the source) and seeding fixes. They complement, but don't replace, the primary-source verification above.
+
 ## Safety nets built into the product
 
 Reviews can't catch everything a real machine might do. These features stay in the design for that reason:

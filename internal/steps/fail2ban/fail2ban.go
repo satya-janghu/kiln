@@ -49,8 +49,8 @@ func (Step) Packages() []step.PackageRef {
 }
 
 func (Step) Applies(env *step.Env) step.Applicability {
-	if !env.Facts.SSHServer {
-		return step.No("no SSH server installed")
+	if !ssh.WillHaveServer(env) {
+		return step.No("no SSH server installed, and the SSH step is off")
 	}
 	return step.Yes()
 }

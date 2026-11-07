@@ -138,7 +138,7 @@ This screen is drawn from the same plan the runner will execute (rule 7). It has
 
 ```
  Review: nothing has changed yet
-  ! SSH becomes key-only (3 keys from github.com/satya). Password logins will stop working.
+  ! SSH password logins are on for satya and root, from anywhere SSH is reachable (D45). Use strong passwords.
   ! Network: enp2s0 moves from ifupdown to NetworkManager (reverted automatically if it fails).
   214 packages · 31 files · 18 services · 6 firewall rules · reboot likely (new kernel)
  [Summary] Packages  Files  Services  Firewall  Commands

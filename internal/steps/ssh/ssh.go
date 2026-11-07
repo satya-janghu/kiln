@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/satya-janghu/kiln/internal/action"
+	"github.com/satya-janghu/kiln/internal/apt"
 	"github.com/satya-janghu/kiln/internal/facts"
 	"github.com/satya-janghu/kiln/internal/options"
 	"github.com/satya-janghu/kiln/internal/revert"
@@ -43,15 +44,15 @@ type Step struct{ step.Base }
 func New() step.Step { return Step{} }
 
 func (Step) ID() string          { return "ssh" }
-func (Step) Title() string       { return "SSH hardening" }
+func (Step) Title() string       { return "SSH server and logins" }
 func (Step) Category() string    { return "security" }
 func (Step) DependsOn() []string { return []string{"firewall"} }
 
-func (Step) Applies(env *step.Env) step.Applicability {
-	if !env.Facts.SSHServer {
-		return step.No("no SSH server installed (choose 'SSH server' in the Debian installer)")
-	}
-	return step.Yes()
+// Applies always: kiln installs and enables the SSH server when it's missing (D45).
+func (Step) Applies(*step.Env) step.Applicability { return step.Yes() }
+
+func (Step) Packages() []step.PackageRef {
+	return []step.PackageRef{{Name: "openssh-server", Suite: "trixie", Component: "main", Repo: "debian"}}
 }
 
 var githubUser = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
@@ -84,12 +85,17 @@ func (Step) Options(*facts.Facts) []options.Field {
 				}
 				return nil
 			}},
-		{Key: "password_logins", Label: "Password logins", Kind: options.Choice, Default: "auto",
+		{Key: "password_logins", Label: "Password logins", Kind: options.Choice, Default: "on",
+			Help: "On by default (D45): your user and root can log in with their passwords from anywhere SSH is reachable.",
 			Choices: []options.ChoiceItem{
+				{Value: "on", Label: "On"},
 				{Value: "auto", Label: "Off once at least one key is installed"},
 				{Value: "off", Label: "Off"},
-				{Value: "on", Label: "On"},
 			}},
+		{Key: "root_login", Label: "Allow root to log in over SSH", Kind: options.Bool, Default: true,
+			Help: "PermitRootLogin yes (D45). With password logins on, root can log in with its password."},
+		{Key: "root_password", Label: "If root has no password, give it your user's password", Kind: options.Bool, Default: true,
+			Help: "Copies your user's password hash from /etc/shadow to root (D45); kiln never sees the password itself."},
 		{Key: "max_auth_tries", Label: "MaxAuthTries", Kind: options.Int, Default: 4,
 			Help: "Agents that offer many keys need IdentitiesOnly on the client.",
 			Validate: func(v any) error {
@@ -403,6 +409,68 @@ func ListenPorts(ctx context.Context, env *step.Env) []int {
 	return out
 }
 
+func rootLogin(env *step.Env) string {
+	if env.Opts.Bool("root_login") {
+		return "yes"
+	}
+	return "no"
+}
+
+// shadowHash returns a user's password field from /etc/shadow.
+func shadowHash(s sys.System, user string) (string, bool) {
+	b, err := s.ReadFile("/etc/shadow")
+	if err != nil {
+		return "", false
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		f := strings.Split(l, ":")
+		if len(f) > 1 && f[0] == user {
+			return f[1], true
+		}
+	}
+	return "", false
+}
+
+// noPassword reports a locked or empty password field ("!", "*", "!*", "").
+func noPassword(h string) bool {
+	return h == "" || strings.HasPrefix(h, "!") || strings.HasPrefix(h, "*")
+}
+
+// rootNeedsPassword reports that root has no usable password but the target
+// user has one kiln can copy (D45).
+func rootNeedsPassword(env *step.Env) bool {
+	if !env.Opts.Bool("root_password") {
+		return false
+	}
+	rh, ok := shadowHash(env.Sys, "root")
+	if !ok || !noPassword(rh) {
+		return false
+	}
+	uh, ok := shadowHash(env.Sys, env.User().Name)
+	return ok && !noPassword(uh)
+}
+
+// WillHaveServer reports whether this run ends with an SSH server: already
+// installed, or the ssh step (which installs it, D45) is ticked. The firewall
+// and fail2ban steps use it.
+func WillHaveServer(env *step.Env) bool {
+	return env.Facts.SSHServer || env.All.IsEnabled("ssh")
+}
+
+func serverReady(ctx context.Context, env *step.Env) string {
+	if !apt.Installed(ctx, env.Sys, "openssh-server") {
+		return "the SSH server (openssh-server) isn't installed"
+	}
+	if SocketMode(ctx, env.Sys) {
+		return ""
+	}
+	r, _ := env.Sys.Query(ctx, sys.Cmd{Name: "systemctl", Args: []string{"is-enabled", "ssh.service"}})
+	if strings.TrimSpace(r.Stdout) != "enabled" {
+		return "the SSH service isn't enabled"
+	}
+	return ""
+}
+
 func passwordAuth(env *step.Env, keys int) string {
 	switch env.Opts.String("password_logins") {
 	case "on":
@@ -419,7 +487,7 @@ func passwordAuth(env *step.Env, keys int) string {
 func dropInContent(env *step.Env, pa string, socket bool) []byte {
 	var b strings.Builder
 	b.WriteString(sys.ManagedHeader("#"))
-	b.WriteString("PermitRootLogin no\n")
+	fmt.Fprintf(&b, "PermitRootLogin %s\n", rootLogin(env))
 	fmt.Fprintf(&b, "MaxAuthTries %d\n", env.Opts.Int("max_auth_tries"))
 	b.WriteString("X11Forwarding no\n")
 	fmt.Fprintf(&b, "PasswordAuthentication %s\n", pa)
@@ -436,7 +504,7 @@ func socketContent(port int) []byte {
 // expected is what `sshd -T -C …` must report.
 func expected(env *step.Env, pa string) map[string]string {
 	return map[string]string{
-		"permitrootlogin":        "no",
+		"permitrootlogin":        rootLogin(env),
 		"maxauthtries":           strconv.Itoa(env.Opts.Int("max_auth_tries")),
 		"x11forwarding":          "no",
 		"passwordauthentication": pa,
@@ -507,6 +575,12 @@ func verify(ctx context.Context, s sys.System, env *step.Env, pa string, socket 
 // ---- step ----
 
 func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
+	if why := serverReady(ctx, env); why != "" {
+		return step.Todo("%s", why), nil
+	}
+	if rootNeedsPassword(env) {
+		return step.Todo("root has no password yet"), nil
+	}
 	want, _, err := desired(ctx, env)
 	if err != nil {
 		return step.Todo("%s", err.Error()), nil
@@ -530,7 +604,7 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 	if err := verify(ctx, env.Sys, env, pa, socket); err != nil {
 		return step.Todo("%s", err.Error()), nil
 	}
-	return step.Done(fmt.Sprintf("root login off, password logins %s, port %d, %d keys", map[string]string{"yes": "on", "no": "off"}[pa], Port(env), len(have))), nil
+	return step.Done(fmt.Sprintf("root login %s, password logins %s, port %d, %d keys", map[string]string{"yes": "on", "no": "off"}[rootLogin(env)], map[string]string{"yes": "on", "no": "off"}[pa], Port(env), len(have))), nil
 }
 
 func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
@@ -554,11 +628,15 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 	port := Port(env)
 
 	if passwordAuth(env, predicted) == "yes" {
-		msg := "SSH password logins stay on"
+		who := env.User().Name
+		if rootLogin(env) == "yes" {
+			who += " and root"
+		}
+		msg := "SSH password logins are on for " + who
 		if env.Opts.String("password_logins") == "auto" {
 			msg += " because no SSH key is installed for " + env.User().Name
 		}
-		msg += ": passwordless sudo + password SSH on the internet is risky. Add a GitHub user or a public key in the SSH options."
+		msg += ", from anywhere SSH is reachable (D45). The firewall keeps SSH open to the internet and fail2ban slows down guessing, but a guessed password gives root access. Use strong passwords, or turn password logins off in the SSH options."
 		env.Notes.Warn("%s", msg)
 		env.Notes.Add("%s", msg)
 	} else if predicted == 0 {
@@ -578,6 +656,37 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 	env.Notes.Add("To reach SSH from the internet, forward port %d on your router to this machine yourself; kiln doesn't change the router.", port)
 
 	var acts []action.Action
+	if !apt.Installed(ctx, env.Sys, "openssh-server") {
+		acts = append(acts, action.AptInstall{Pkgs: []string{"openssh-server"}})
+	}
+	if !socket {
+		if r, _ := env.Sys.Query(ctx, sys.Cmd{Name: "systemctl", Args: []string{"is-enabled", "ssh.service"}}); strings.TrimSpace(r.Stdout) != "enabled" {
+			acts = append(acts, action.Systemctl{Verb: "enable", Units: []string{"ssh.service"}, Now: true})
+		}
+	}
+	if rootNeedsPassword(env) {
+		u := env.User().Name
+		acts = append(acts, action.Custom{
+			Desc: fmt.Sprintf("if root has no password, give it the same password as %s by copying %s's password hash from /etc/shadow (chpasswd -e, hash on stdin, never logged)", u, u),
+			K:    action.Commands,
+			Fn: func(ctx context.Context, s sys.System) error {
+				rh, ok := shadowHash(s, "root")
+				if s.DryRun() || !ok || !noPassword(rh) {
+					return nil
+				}
+				uh, ok := shadowHash(s, u)
+				if !ok || noPassword(uh) {
+					env.Notes.Add("root has no password and %s has none either, so root can't log in with a password. Set one with `sudo passwd root`.", u)
+					return nil
+				}
+				if _, err := s.Run(ctx, sys.Cmd{Name: "chpasswd", Args: []string{"-e"}, Stdin: []byte("root:" + uh + "\n"), Redact: []string{uh}, Quiet: true}); err != nil {
+					return fmt.Errorf("couldn't set root's password: %w", err)
+				}
+				env.Notes.Add("root had no password, so it now has the same password as %s.", u)
+				return nil
+			},
+		})
+	}
 	if len(missing) > 0 {
 		acts = append(acts, action.Custom{
 			Desc: fmt.Sprintf("add %d public key(s) to %s (each checked with ssh-keygen -l first; existing lines are kept, 0600, directory 0700, owned by %s)", len(missing), akPath, env.User().Name),
@@ -585,7 +694,7 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 			Fn:   func(ctx context.Context, s sys.System) error { return mergeKeys(ctx, s, env, akPath, missing) },
 		})
 	}
-	desc := fmt.Sprintf("write %s (PermitRootLogin no, MaxAuthTries %d, X11Forwarding no, password logins decided by the installed keys", DropIn, env.Opts.Int("max_auth_tries"))
+	desc := fmt.Sprintf("write %s (PermitRootLogin %s, MaxAuthTries %d, X11Forwarding no, PasswordAuthentication %s", DropIn, rootLogin(env), env.Opts.Int("max_auth_tries"), passwordAuth(env, predicted))
 	if port != 22 {
 		if socket {
 			desc += fmt.Sprintf("; port %d in %s", port, SocketDropIn)

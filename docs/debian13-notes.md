@@ -249,3 +249,14 @@ These came out of implementation on 2026-11-07. The code uses them, so each must
 | `ifup <iface>` exits 0 when the interface is already configured (the network-migration revert relies on it) | U | network-migration | ifupdown 0.8.44 ifup(8), source |
 | `ss -H -l -t -n -p sport = :N` with the filter passed as separate argv words | U | ssh | iproute2 ss(8) (trixie) |
 | `sshd -T` lists every `port` line (used to derive the firewall's SSH ports) | U | firewall, ssh | sshd(8) 10.0p1 |
+
+## Field observations (test machine 10.10.10.150, 2026-11-07)
+
+Observed directly on a fresh Debian 13 server install (no desktop, Wi-Fi). These are evidence, not primary documentation.
+
+| Observation | Status | Source |
+|---|---|---|
+| A root password was set during install → `sudo` isn't installed ("sudo: command not found"), so kiln must be started as root (`su -`) the first time. | V (observed) | test machine; matches user-setup 1.107 |
+| The SSH banner reads `SSH-2.0-OpenSSH_10.0p2 Debian-7+deb13u4`. The banner says 10.0p2, while the notes elsewhere name the package version 1:10.0p1-7+deb13u4; kiln never parses this banner. | V (observed) | `nc 10.10.10.150 22` |
+| Wi-Fi power saving was on by default: 19–572 ms latency and 6.7% loss to the machine on the LAN, versus 2 ms to the router. After `iw … set power_save off`, 3–7 ms and no loss. | V (observed) | ping from the LAN |
+| SSH connection timeouts from one macOS app while SSH from another app on the same Mac worked: caused on the Mac (an AdGuard network extension filtering per app is the main suspect), not by Debian or OpenWRT. | R | diagnosis, 2026-11-07 |

@@ -44,5 +44,5 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-      - name: shellcheck install.sh
-        run: if [ -f install.sh ]; then shellcheck install.sh; else echo "install.sh not present yet"; fi
+      - name: shellcheck install.sh scripts/field-check.sh
+        run: shellcheck install.sh scripts/field-check.sh

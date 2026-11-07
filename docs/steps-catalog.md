@@ -6,7 +6,7 @@ Steps run in the order listed. Every step and sub-option defaults to **on** in t
 
 **The Debian installer owns the desktop (GNOME or none), the SSH server and blends.** kiln never installs or removes them. It detects them in `preflight`, and steps that depend on them are "not applicable" when they're absent. Verified against tasksel 3.81 and blendsel 0.10:
 - **"GNOME detected"** means `gnome-shell` and `gdm3` are installed. `task-gnome-desktop` → `gnome-core` pulls in both.
-- **"SSH server detected"** means `openssh-server` is installed. `task-ssh-server` depends on it.
+- **"SSH server detected"** means `openssh-server` is installed. `task-ssh-server` depends on it. Exception (D45): the ssh step installs and enables the SSH server when it's missing, and the firewall and fail2ban treat SSH as present whenever that step is ticked.
 - **"Standard system utilities"** is not a package: it's every Priority: standard package.
 - **Blends** are the `task-*-blend` packages (astro, med, junior-desktop, science, freedombox, hamradio). Debian Edu isn't offered by the installer.
 
@@ -82,7 +82,7 @@ All apt operations use the `apt` helper: non-interactive, confold, lock wait (se
 1. Install `sudo` if missing. Verified in user-setup 1.107: debian-installer installs sudo and runs `adduser <user> sudo` only when the root password is left empty (`passwd/root-login=false`). With a root password set, the user isn't in the group, and sudo is usually absent.
 2. `adduser <user> sudo` (adduser 3.152: two arguments add an existing user to an existing group; a no-op if already a member).
 3. File name: `/etc/sudoers.d/90-<sanitized>-nopasswd`. sudoers(5) (sudo 1.9.16) skips files whose names end in `~` or contain a `.`. Sanitize to `[a-z0-9_-]`, replacing anything else with `_`.
-4. Content: `<user> ALL=(ALL:ALL) NOPASSWD: ALL`. Debian's `/etc/sudoers` ends with `@includedir /etc/sudoers.d`, after `%sudo ALL=(ALL:ALL) ALL`, so this later rule wins.
+4. Content: `<user> ALL=(ALL:ALL) NOPASSWD: ALL`. With "passwordless sudo" **off**, kiln writes `/etc/sudoers.d/90-<sanitized>` with `<user> ALL=(ALL:ALL) ALL` instead (D45). The rule names the user directly, so sudo works immediately, without the re-login a new sudo-group membership needs. An existing `-nopasswd` file is left in place (D44). Debian's `/etc/sudoers` ends with `@includedir /etc/sudoers.d`, after `%sudo ALL=(ALL:ALL) ALL`, so this later rule wins.
    - Write it to a temp file and validate with `visudo -cf <tmp>`.
    - Install it 0440 root:root through the managed writer.
    - Then run `visudo -c` to check the **whole** policy, including ownership and modes. visudo(8) says checking a single include file isn't sufficient. If that fails, delete the file and fail the step.
@@ -594,9 +594,9 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 
 **ID** `ssh` · security · depends: firewall (for a custom port) · **risky**
 
-**Purpose:** harden the SSH server that the installer put on the machine, for later remote access. kiln itself is run at the console.
+**Purpose:** make sure SSH works with your user's and root's passwords (D45), plus keys, for later remote access. kiln itself is run at the console.
 
-**Applies:** an SSH server was detected (you chose "SSH server" in the installer). Otherwise "not applicable: no SSH server installed (choose 'SSH server' in the Debian installer)". kiln never installs one.
+**Applies:** always. If the installer didn't install an SSH server, this step installs `openssh-server` and enables `ssh.service` (D45; this reverses D29 for SSH only).
 
 **Facts used** (openssh 1:10.0p1-7+deb13u4):
 - **Include order:** Debian's `sshd_config` has `Include /etc/ssh/sshd_config.d/*.conf` at line 13. Drop-ins are read in lexical order and the first value wins, and debconf answers are written after the Include, so a low-numbered drop-in wins.
@@ -606,17 +606,19 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 - **Keys:** DSA is gone. `ssh-rsa` keys still work, using rsa-sha2 signatures.
 
 **Actions:**
-1. **Keys.**
+1. **Server.** Install `openssh-server` if missing, and `systemctl enable --now ssh.service` if it isn't enabled (unless `ssh.socket` was enabled by hand).
+2. **Root password** (option on): if root's `/etc/shadow` password field is locked or empty (`!`, `*`, or blank) and the target user has a password, copy the user's password **hash** to root with `chpasswd -e` (the `root:<hash>` line goes on stdin, never argv, and the output isn't logged). root then has the same password as the user, and kiln never sees the password itself. If the user has no password either, a note says to run `sudo passwd root`.
+3. **Keys.**
    - Fetch `https://github.com/<GitHub user>.keys` over HTTPS, with a size cap and a 10 s timeout. A 404 means the user doesn't exist, which is an error in the options form. A 200 with an empty body means "no public keys". The endpoint is undocumented but stable: plain text, one `type base64` per line.
    - Add the extra keys from the options.
    - Validate each line by writing it to a temp file and running `ssh-keygen -l -f <tmp>`. `ssh-dss` lines are skipped with a note.
    - Merge into `<home>/.ssh/authorized_keys` (0600, directory 0700, owned by the user). Deduplicate on key type + blob, never on the whole line. Only missing keys are added, and nothing is ever removed. Added lines get a trailing comment ` kiln:github` or ` kiln:manual`.
-2. **Drop-in** `/etc/ssh/sshd_config.d/10-kiln.conf`:
-   - `PermitRootLogin no`, `MaxAuthTries 4` (the owner's choice), `X11Forwarding no`.
-   - `PasswordAuthentication no` **only if** the user has at least one valid key installed. Otherwise it stays `yes`, with a loud warning on the review screen and in the summary: "passwordless sudo + password SSH on the internet is risky".
+4. **Drop-in** `/etc/ssh/sshd_config.d/10-kiln.conf`:
+   - `PermitRootLogin yes` (option "Allow root to log in over SSH", on by default, D45), `MaxAuthTries 4` (the owner's choice), `X11Forwarding no`.
+   - `PasswordAuthentication yes` by default (option "Password logins": `on`, D45). The other values are `auto` (off once at least one key is installed) and `off`. When passwords are on, the review screen and summary warn that password logins for the user and root are open to anywhere SSH is reachable, and that the firewall keeps SSH open to the internet, with fail2ban slowing down guessing.
    - `KbdInteractiveAuthentication no` is left out, because Debian already sets it.
-3. **Port** (when it isn't 22): `Port <n>` in the drop-in. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`. The firewall step has already opened the port in both zones.
-4. **Verify, then revert on failure:**
+5. **Port** (when it isn't 22): `Port <n>` in the drop-in. Port lines add up, so if the main `sshd_config` (or another drop-in) has an uncommented `Port`, kiln warns that sshd will also listen there, and leaves the file as is. If `ssh.socket` was enabled by hand instead of `ssh.service`, the port goes in an `ssh.socket` drop-in instead (`ListenStream=` then `ListenStream=<n>`), which needs `daemon-reload` and `restart ssh.socket`. The firewall step has already opened the port in both zones.
+6. **Verify, then revert on failure:**
    1. Record `pending` and validate with `sshd -t`.
    2. Apply with `systemctl reload ssh`.
    3. Check:
@@ -625,7 +627,7 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
       - `sshd -T -C user=<target>,host=<hostname>,addr=<lan-ip>` shows the expected values. Without `-C`, `-T` ignores `Match` blocks, so a `Match User` block that re-enables passwords would go unseen.
    4. If anything fails, restore the previous drop-in, reload, and record `failed`.
 
-**Check:** the keys are present, the drop-in matches, the `sshd -T -C …` values match, and the port is listening.
+**Check:** `openssh-server` is installed and `ssh.service` enabled, root has a password (when the option is on and the user has one), the keys are present, the drop-in matches, the `sshd -T -C …` values match, and the port is listening.
 
 **Gotchas:** the service is `ssh` (`sshd.service` is an alias). `MaxAuthTries 4` can lock out SSH agents that offer more than 4 keys before the right one. The summary notes `IdentitiesOnly yes` / `IdentityFile` as the client-side fix. Router port forwarding is manual, so it's only noted.
 
@@ -635,7 +637,7 @@ Verified against trixie (GNOME 48, UPower 1.90.9). UPower's udev rule enables th
 
 **ID** `fail2ban` · security · depends: ssh, firewall
 
-**Applies:** an SSH server was detected, because the only jail is `sshd`. Otherwise "not applicable: no SSH server installed".
+**Applies:** an SSH server was detected, or the ssh step is ticked (it installs one, D45), because the only jail is `sshd`. Otherwise "not applicable: no SSH server installed, and the SSH step is off".
 
 **Facts used** (fail2ban 1.1.0-8):
 - **Debian defaults:** `jail.d/defaults-debian.conf` sets `banaction = nftables`, `banaction_allports = nftables[type=allports]`, and `[sshd] enabled = true`, `backend = systemd`, `journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd`.

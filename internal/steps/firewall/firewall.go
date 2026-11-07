@@ -143,7 +143,7 @@ type want struct {
 // kept open here; the ssh step closes it through closeOldSSHPorts only after
 // the new port has been verified and committed.
 func sshPorts(ctx context.Context, env *step.Env) []int {
-	if !env.Facts.SSHServer {
+	if !ssh.WillHaveServer(env) {
 		return nil
 	}
 	ports := ssh.CurrentPorts(ctx, env.Sys)
@@ -162,12 +162,13 @@ func sshPorts(ctx context.Context, env *step.Env) []int {
 
 func desired(ctx context.Context, env *step.Env) want {
 	f := env.Facts
-	w := want{lan: LANSubnets(env), ssh: f.SSHServer, sshPorts: sshPorts(ctx, env), extra: env.Opts.List("extra_ports"), strict: env.Opts.Bool("strict_docker_ports")}
+	hasSSH := ssh.WillHaveServer(env) // the ssh step installs it when missing (D45)
+	w := want{lan: LANSubnets(env), ssh: hasSSH, sshPorts: sshPorts(ctx, env), extra: env.Opts.List("extra_ports"), strict: env.Opts.Bool("strict_docker_ports")}
 	w.lanServices = []string{"cockpit"}
 	if f.GNOME {
 		w.lanServices = append(w.lanServices, "rdp")
 	}
-	if f.SSHServer {
+	if hasSSH {
 		w.lanServices = append(w.lanServices, "ssh")
 	}
 	for _, p := range w.sshPorts {

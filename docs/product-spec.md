@@ -6,7 +6,7 @@
 
 ## How it's used
 
-1. Install Debian 13 with the official installer. **The installer decides** whether there's a desktop (GNOME or none), whether to install the SSH server, and whether to use any Debian blend.
+1. Install Debian 13 with the official installer. **The installer decides** whether there's a desktop (GNOME or none) and whether to use any Debian blend. kiln installs the SSH server itself if you didn't pick it (D45).
 2. Log in at the machine's own console, as your user with sudo or as root via `su -`.
 3. Type the one-liner (see [distribution.md](distribution.md)). It installs the `kiln` binary and starts the wizard.
 4. The wizard works like this:
@@ -67,7 +67,7 @@ The wizard applies changes only on Linux, and only if `/etc/kiln/allow-apply` ex
 ## Out of scope
 
 - Installing or switching desktops. That's the installer's job, and only GNOME or none is supported.
-- Installing the SSH server (also the installer's job), and Debian blends.
+- Debian blends. (The SSH server is installed by kiln if missing; D45.)
 - Saved profiles, headless or unattended runs, and use over SSH.
 - Automated tests of any kind (see [review-process.md](review-process.md)).
 - Backups and snapshots.

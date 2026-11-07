@@ -493,6 +493,33 @@ Details I filled in, flagged for your review:
 - When "passwordless sudo" is turned **off** on a machine that already has kiln's sudoers file, the file is left in place. Removing it would be new behavior.
 - TLP is stopped, not disabled (D43).
 
+### D45 · 2026-11-07 · SSH works with passwords for the user and root; sudo works without re-login
+
+**Status: decided** (your request and answers, 2026-11-07).
+
+This **reverses** your brief's "key-only auth when keys exist, no root login", and D29 for SSH only (kiln now installs the SSH server).
+
+- **ssh step, on by default:**
+  - Installs `openssh-server` if missing and enables `ssh.service`.
+  - `PasswordAuthentication yes` and `PermitRootLogin yes`, from everywhere. You chose this over LAN-only.
+  - The review screen and summary warn that password SSH for the user and root is reachable wherever SSH is (internet included), with fail2ban as the only brake.
+- **Root without a password:** if root's password is locked or empty, kiln gives root the target user's password by copying the user's password hash (`chpasswd -e`, hash on stdin, never logged). If the user has no password either, kiln adds a note to run `sudo passwd root`.
+- **Firewall and fail2ban** treat SSH as present whenever the ssh step is ticked, so SSH is never blocked and the sshd jail is active.
+- **sudo step:** with passwordless sudo **off**, it writes `/etc/sudoers.d/90-<user>` with `<user> ALL=(ALL:ALL) ALL`, validated with visudo. Either way, sudo works immediately, without logging out. With it **on**, nothing changes: the NOPASSWD rule is written as before.
+- **Defaults I set,** flagged for your review:
+  - the option names `root_login` and `root_password`;
+  - "Password logins" is now `on` by default, with `auto` and `off` still available.
+
+### D46 · 2026-11-07 · Read-only field check on real hardware
+
+**Status: decided** (you offered a test machine and asked for testing; the script is review tooling, not a test suite, D30).
+
+- **The script:** `scripts/field-check.sh` collects read-only evidence from a real machine (review-process.md, "Field check"). It's shellcheck-ed by `make lint` and CI.
+- **Test machine:** 10.10.10.150, a fresh Debian 13 server install with no desktop, on Wi-Fi (an AzureWave module). A root password was set, so `sudo` isn't installed.
+- **How it's run:** the owner runs the commands. Claude doesn't log in with passwords, so it can't run them itself.
+
+Field observations so far are in debian13-notes.md, "Field observations".
+
 ## Proposals from the second verification pass
 
 **Status:** you accepted all of these on 2026-11-07 as written (the "current text" option), except P1 and P14, which D38 replaces. They're kept here as a record of the choices and the alternatives.
@@ -643,4 +670,8 @@ These are what Cockpit's networking, storage and updates pages need, and they pu
 
 ## Open questions
 
-None right now. New ones go here.
+1. **Wi-Fi power saving on always-on machines.** On the test machine, the Wi-Fi link had 19–572 ms latency and 6.7% packet loss. After `iw dev <wlan> set power_save off` it dropped to 3–7 ms with no loss. kiln doesn't change Wi-Fi power saving today. The proposal is a new default-on option in the power step:
+   - a NetworkManager drop-in `[connection] wifi.powersave = 2`, on machines where NetworkManager manages Wi-Fi;
+   - plus `iw dev <wlan> set power_save off` for the current session.
+
+   Both facts would need verifying for trixie first. Your call.

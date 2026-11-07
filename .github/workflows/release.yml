@@ -43,8 +43,8 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-      - name: shellcheck install.sh
-        run: shellcheck install.sh
+      - name: shellcheck install.sh scripts/field-check.sh
+        run: shellcheck install.sh scripts/field-check.sh
 
   goreleaser:
     needs: checks

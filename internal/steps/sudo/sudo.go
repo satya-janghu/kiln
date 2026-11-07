@@ -33,7 +33,7 @@ func (Step) Packages() []step.PackageRef {
 
 func (Step) Options(*facts.Facts) []options.Field {
 	return []options.Field{{Key: "nopasswd", Label: "Passwordless sudo", Kind: options.Bool, Default: true,
-		Help: "Writes /etc/sudoers.d/90-<user>-nopasswd so your user can run sudo without a password."}}
+		Help: "On: /etc/sudoers.d/90-<user>-nopasswd (sudo without a password). Off: /etc/sudoers.d/90-<user> (sudo with a password). Either way it works right away, without logging out."}}
 }
 
 var unsafe = regexp.MustCompile(`[^a-z0-9_-]`)
@@ -45,6 +45,26 @@ func fileFor(user string) string {
 
 func content(user string) []byte {
 	return []byte(sys.ManagedHeader("#") + user + " ALL=(ALL:ALL) NOPASSWD: ALL\n")
+}
+
+// passwordFileFor is the rule used when passwordless sudo is off (D45): it
+// names the user directly, so sudo works immediately, without the re-login
+// that a new sudo-group membership needs.
+func passwordFileFor(user string) string {
+	return "/etc/sudoers.d/90-" + unsafe.ReplaceAllString(strings.ToLower(user), "_")
+}
+
+func passwordContent(user string) []byte {
+	return []byte(sys.ManagedHeader("#") + user + " ALL=(ALL:ALL) ALL\n")
+}
+
+// rule returns the sudoers.d file and content for the current option.
+func rule(env *step.Env) (string, []byte) {
+	u := env.User().Name
+	if env.Opts.Bool("nopasswd") {
+		return fileFor(u), content(u)
+	}
+	return passwordFileFor(u), passwordContent(u)
 }
 
 func inGroup(ctx context.Context, s sys.System, user, group string) bool {
@@ -68,10 +88,10 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 	if !inGroup(ctx, env.Sys, u, "sudo") {
 		return step.Todo("%s isn't in the sudo group", u), nil
 	}
-	if env.Opts.Bool("nopasswd") {
-		path := fileFor(u)
+	{
+		path, data := rule(env)
 		b, err := env.Sys.ReadFile(path)
-		if err != nil || string(b) != string(content(u)) {
+		if err != nil || string(b) != string(data) {
 			return step.Todo("%s is missing or different", path), nil
 		}
 		fi, err := env.Sys.Stat(path)
@@ -82,7 +102,10 @@ func (s Step) Check(ctx context.Context, env *step.Env) (step.Status, error) {
 			return step.Todo("the sudo policy doesn't validate: %v", err), nil
 		}
 	}
-	return step.Done(u + " can use sudo"), nil
+	if env.Opts.Bool("nopasswd") {
+		return step.Done(u + " can use sudo without a password"), nil
+	}
+	return step.Done(u + " can use sudo (with a password)"), nil
 }
 
 func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
@@ -92,9 +115,8 @@ func (s Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) 
 		acts = append(acts, action.AptInstall{Pkgs: []string{"sudo"}})
 	}
 	acts = append(acts, action.UserAddGroup{User: u, Group: "sudo"})
-	if env.Opts.Bool("nopasswd") {
-		path := fileFor(u)
-		data := content(u)
+	{
+		path, data := rule(env)
 		acts = append(acts, action.Custom{
 			Desc: fmt.Sprintf("write %s (0440) after validating it with visudo -cf, then check the whole policy with visudo -c", path),
 			K:    action.Files,

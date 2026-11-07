@@ -9,7 +9,7 @@ Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (
 | Step | Option | Default | Values / notes |
 |---|---|---|---|
 | (all) | target user | detected | `SUDO_USER`, then the first UID ≥ 1000 with a login shell. It isn't an option: if none is found, preflight stops and says to create one with `adduser` |
-| sudo | passwordless sudo | on | writes `/etc/sudoers.d/90-<user>-nopasswd` |
+| sudo | passwordless sudo | on | on: `/etc/sudoers.d/90-<user>-nopasswd`; off: `/etc/sudoers.d/90-<user>` with a password rule (D45). Works without re-login either way |
 | apt-sources | trixie-backports | on | packages come from backports only when a step asks for them |
 | apt-sources | dpkg lock wait | 10 min | how long to wait for unattended-upgrades |
 | mirrors | country | auto | ISO code; auto = from the timezone (Asia/Kolkata → IN); never geo-IP |
@@ -54,7 +54,9 @@ Every step in [steps-catalog.md](steps-catalog.md) also has an on/off checkbox (
 | ssh | GitHub user for keys | empty | fetches `https://github.com/<user>.keys` |
 | ssh | extra public keys | none | |
 | ssh | port | 22 | |
-| ssh | password logins | auto | auto = off once at least one key is installed |
+| ssh | password logins | on | `on` (D45), `auto` = off once at least one key is installed, or `off` |
+| ssh | allow root to log in | on | `PermitRootLogin yes` (D45) |
+| ssh | give root your user's password if it has none | on | copies the password hash (D45) |
 | ssh | MaxAuthTries | 4 | the owner's choice (upstream default 6); agents offering many keys need `IdentitiesOnly` on the client |
 | fail2ban | ban time / increment / max retries | 1h / on / 5 | |
 | docker | log rotation | 10m × 3 | json-file driver |
@@ -149,7 +151,9 @@ Additional cases:
 | `ssh.github_user` | GitHub user for keys | string | (empty) |
 | `ssh.extra_keys` | Extra public keys | list | [] |
 | `ssh.port` | Port | int | 22 |
-| `ssh.password_logins` | Password logins | choice | auto [auto/off/on] |
+| `ssh.password_logins` | Password logins | choice | on [on/auto/off] |
+| `ssh.root_login` | Allow root to log in over SSH | bool | true |
+| `ssh.root_password` | If root has no password, give it your user's password | bool | true |
 | `ssh.max_auth_tries` | MaxAuthTries | int | 4 |
 | `fail2ban` | *step on/off* | bool | on |
 | `fail2ban.bantime` | Ban time | string | 1h |
