@@ -535,6 +535,24 @@ Field observations so far are in debian13-notes.md, "Field observations".
   - `MachineName()` drops a vendor repeated in the product name and DMI placeholders such as `Type1ProductConfigId`, and the facts screen no longer adds the version back.
 - **Readability:** step failures show the action's short description instead of the whole wrapped error chain (`action.Short`).
 
+### D48 · 2026-11-07 · Network-migration undo uses ifupdown's own units (P18 option A)
+
+**Status: decided** (you chose option A).
+
+- **allow-hotplug interfaces:** the undo runs `systemctl restart ifup@<iface>.service`. It uses restart rather than start, because kiln's `ifdown` leaves the unit active and `start` would do nothing; the unit's `ifdown` on an interface that's already down succeeds.
+  - An interface that is both `allow-hotplug` and `auto` takes this path, because it only touches that one interface. This is my reading of option A, which doesn't name that case.
+- **auto-only interfaces:** `systemctl restart networking.service`.
+- **Interfaces in neither class:** plain `ifup`.
+- The same commands are recorded in `state.json`, so a revert offered at the next start does the same thing.
+
+### D49 · 2026-11-07 · Network-migration undo waits for Wi-Fi to be released and for ifup to finish (forced)
+
+**Status: forced.** The forced-failure test of D48 left the test machine offline, and the journal showed two bugs. Both fixes are the only way for the catalog's revert to work.
+
+- **The race:** NetworkManager's wpa_supplicant released wlo1 asynchronously after `managed no`. ifupdown's wpa_supplicant started first, found the control socket still in use and refused to start. The undo now waits, for up to 30 s, until `/run/wpa_supplicant/<iface>` is gone.
+- **The missed failure:** `ifup@.service` is `Type=simple`, so `systemctl restart` returned before `ifup` had finished, and kiln reported a good undo. kiln now polls the unit until it is `active/exited` or `failed`, for up to 6 min, and reports a failure with the `journalctl` command to run.
+- **How it's recorded:** a restore step can be a Go function a step registers (`revert.Register`, recorded as `kiln: <name> <args>`), so a revert at the next start waits the same way. `revert.Poll` stops early on `revert.Final` errors.
+
 ## Proposals from the second verification pass
 
 **Status:** you accepted all of these on 2026-11-07 as written (the "current text" option), except P1 and P14, which D38 replaces. They're kept here as a record of the choices and the alternatives.
@@ -687,7 +705,7 @@ These are what Cockpit's networking, storage and updates pages need, and they pu
 
 ### P18 · Undo brings the interface back through `ifup@<iface>.service` (step 6)
 
-**Status: proposed.** Not implemented.
+**Status: approved 2026-11-07 (option A), implemented as D48.**
 
 When a migration fails its check, the undo runs `ifup <iface>` from kiln's process. That works (field test run 2), but wpa_supplicant and dhcpcd then live in kiln's `kiln-run-*.scope` instead of `ifup@<iface>.service`, where Debian puts them at boot. They survive kiln exiting, but anything that stops that scope would take the network down, and `systemctl status ifup@<iface>` won't show them.
 

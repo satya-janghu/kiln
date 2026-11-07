@@ -281,7 +281,12 @@ After that, the backports metapackage brings each newer backports kernel. The `a
    7. `nmcli --wait 90 connection up kiln-<iface> ifname <iface>`, which waits for activation (90 s is nmcli's default for `up`).
 7. Check locally, polling for up to 60 s (D41 deadline): the link is up and has an address, the default route is present, DNS resolves, and HTTPS to `deb.debian.org` works.
    - **If it passes,** run `nmcli connection modify kiln-<iface> connection.autoconnect yes` so it comes up at boot, then clear `pending`. If the address changed, show the new IP on the run screen and in the summary.
-   - **If it fails, revert:** `nmcli connection down kiln-<iface>`, delete the profile, `nmcli device set <iface> managed no`, `ip addr flush dev <iface>`, restore `interfaces`, `ifup <iface>`, clear `pending`, and record `failed`.
+   - **If it fails, revert:** `nmcli connection down kiln-<iface>`, delete the profile, `nmcli device set <iface> managed no`, `ip addr flush dev <iface>`, restore `interfaces`, and bring the interface up the way Debian does at boot (D48). Then wait up to 60 s for the network check to pass again, clear `pending`, and record `failed`. Bringing it up:
+     - `allow-hotplug`: `systemctl restart ifup@<iface>.service` (instance name escaped like `systemd-escape`). Restart, because kiln's own `ifdown` leaves the unit active; the unit's `ifdown` on an interface that's already down is harmless.
+     - `auto` only: `systemctl restart networking.service`, which also restarts any other interfaces still on ifupdown.
+     - neither: `ifup <iface>`.
+     This way wpa_supplicant and dhcpcd run in ifupdown's own unit, not in kiln's scope.
+     Before bringing it up, kiln waits up to 30 s for `/run/wpa_supplicant/<iface>` to disappear. NetworkManager's wpa_supplicant lets go of the interface asynchronously after `managed no`, and ifupdown's wpa_supplicant refuses to start while that control socket exists. For `ifup@`, which is `Type=simple`, kiln then polls the unit for up to 6 min until it is `active/exited` (success) or `failed`, because `systemctl restart` returns as soon as `ifup` has started (D49). The whole bring-up is one registered restore step (`kiln: ifupdown-up <iface>` in `state.json`), so a revert offered at the next start waits the same way.
 8. Disable `networking.service` only if no non-`lo` stanza remains in `interfaces`.
 
 **Check:** every stanza kiln migrated is gone, those interfaces are managed by NM with their `kiln-*` profile set to autoconnect (an unplugged cable still counts as done), and `networking.service` is disabled, or any stanza left behind is listed as an intentional exception (Wi-Fi without a readable PSK, or a manual-only stanza).

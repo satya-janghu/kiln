@@ -3,6 +3,7 @@ package netmigrate
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/satya-janghu/kiln/internal/sys"
@@ -193,6 +194,61 @@ func (c *config) stanza(iface, family string) *stanza {
 		}
 	}
 	return nil
+}
+
+// bringUp is the command that brings iface back up on ifupdown the way Debian
+// does at boot (D48, P18 option A), so wpa_supplicant and dhcpcd run in
+// ifupdown's own unit and not in kiln's scope (ifupdown 0.8.44+deb13u1
+// debian/ifup@.service, debian/networking.service, debian/ifupdown-hotplug):
+//   - allow-hotplug: restart ifup@<iface>.service, which udev starts at boot.
+//     Restart, not start: kiln's own `ifdown` leaves the unit active, and the
+//     unit's ExecStop `ifdown` on an interface that is already down succeeds
+//     (main.c: "not configured" is a warning). Checked first because it only
+//     touches this interface.
+//   - auto: restart networking.service (`ifdown -a`, then `ifup -a`). This
+//     also restarts the other interfaces still on ifupdown.
+//   - neither: plain `ifup`, since no unit owns the interface at boot.
+func (c *config) bringUp(iface string) []string {
+	hotplug, auto := false, false
+	for _, a := range c.autos {
+		if !slices.Contains(a.ifaces, iface) {
+			continue
+		}
+		switch a.kind {
+		case "allow-hotplug":
+			hotplug = true
+		case "auto", "allow-auto":
+			auto = true
+		}
+	}
+	switch {
+	case hotplug:
+		return []string{"systemctl", "restart", "ifup@" + unitEscape(iface) + ".service"}
+	case auto:
+		return []string{"systemctl", "restart", "networking.service"}
+	}
+	return []string{"ifup", iface}
+}
+
+// unitEscape escapes a string for a systemd unit instance name like
+// `systemd-escape` (systemd.unit(5) "String Escaping"): ASCII letters, digits,
+// ':', '_' and '.' (except a leading '.') stay; '/' becomes '-'; every other
+// byte becomes \xNN. ifupdown-hotplug builds the same name with
+// `systemd-escape --template ifup@.service <iface>`.
+func unitEscape(v string) string {
+	var b strings.Builder
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case c == '/':
+			b.WriteByte('-')
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == ':', c == '_', c == '.' && i > 0:
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, `\x%02x`, c)
+		}
+	}
+	return b.String()
 }
 
 // filesFor lists the files that mention iface (stanzas or auto lines).

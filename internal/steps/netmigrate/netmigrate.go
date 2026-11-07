@@ -273,13 +273,14 @@ func migrate(ctx context.Context, s sys.System, env *step.Env, t target, p profi
 	// What the revert runs after restoring the files depends on how far the
 	// migration got, so it never removes a live address ifupdown still owns:
 	//   - before ifdown: ifupdown still runs the interface; only make NM forget the profile;
-	//   - once ifdown has started: bring it back up with ifup (a no-op while it is still up);
+	//   - once ifdown has started: bring it back up the way Debian does at boot
+	//     and wait until that has finished (upRestore, bringup.go; D48, D49);
 	//   - once ifdown succeeded: NM may have configured it, so take it from NM,
-	//     flush whatever NM set, then ifup.
+	//     flush whatever NM set, then bring it up the same way.
 	reload := []string{"nmcli", "connection", "reload"}
 	beforeDown := [][]string{reload}
-	downStarted := [][]string{reload, {"ifup", name}}
-	afterDown := [][]string{reload, {"nmcli", "device", "set", name, "managed", "no"}, {"ip", "addr", "flush", "dev", name}, {"ifup", name}}
+	downStarted := [][]string{reload, upRestore(name)}
+	afterDown := [][]string{reload, {"nmcli", "device", "set", name, "managed", "no"}, {"ip", "addr", "flush", "dev", name}, upRestore(name)}
 	paths := append(slices.Clone(t.files), kf)
 	if err := revert.Begin(ctx, s, env.State, stepID, "moving "+name+" to NetworkManager", paths, beforeDown); err != nil {
 		return fmt.Errorf("couldn't record the network change before making it: %w", err)
