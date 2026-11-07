@@ -315,7 +315,11 @@ func clientIdentity(s sys.System, nic *facts.NIC) (clientID, duid, note string) 
 		if err == nil {
 			for _, l := range strings.Split(string(b), "\n") {
 				if v, found := strings.CutPrefix(strings.TrimSpace(l), "default-duid "); found {
-					if raw := decodeDhclientString(v); len(raw) > 0 {
+					// dhclient.conf(5) lease-id-format: "octal" (default) writes a
+					// quoted string with \NNN escapes, "hex" an unquoted aa:bb:… list.
+					if h, ok := colonHex(strings.TrimSuffix(strings.TrimSpace(v), ";")); ok {
+						duid = h
+					} else if raw := decodeDhclientString(v); len(raw) > 0 {
 						duid = hexColons(raw)
 					}
 				}

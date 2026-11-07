@@ -209,8 +209,11 @@ func (Step) Plan(ctx context.Context, env *step.Env) ([]action.Action, error) {
 	return acts, nil
 }
 
-// report runs isenkram in list mode: package names on stdout, info on stderr,
-// exit 1 when nothing is missing (trixie's isenkram-autoinstall-firmware source).
+// report runs isenkram in list mode: package names on stdout (`echo
+// $binpkgs`), every "info:" line on stderr; it exits 1 only when no loaded
+// driver requests firmware, and 0 otherwise, including "No new firmware
+// package" (isenkram 0.69+deb13u1 isenkram-autoinstall-firmware; seen on the
+// HP test machine). So only stdout decides, whatever the exit code.
 func report(ctx context.Context, env *step.Env, s sys.System) {
 	r, err := s.Query(ctx, sys.Cmd{Name: "isenkram-autoinstall-firmware", Args: []string{"-l"}, Timeout: 10 * time.Minute})
 	pkgs := strings.Fields(r.Stdout)

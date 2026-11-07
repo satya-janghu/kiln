@@ -232,26 +232,26 @@ These came out of implementation on 2026-11-07. The code uses them, so each must
 
 | Fact the code relies on | Status | Where | Verify against |
 |---|---|---|---|
-| `apt-config dump` prints list values as `Key:: "v";` | U | autoupdates | apt 3.0.3 source / apt-config(8) |
+| `apt-config dump` prints list values as `Key:: "v";`, after a header line `Key "";` | V | autoupdates | observed with apt 3.0.4: `Unattended-Upgrade::Origins-Pattern "";` then `Unattended-Upgrade::Origins-Pattern:: "origin=*";`, field test 2026-11-07 (HP test machine) |
 | `systemctl show -p TimersCalendar` output format | V (observed) | autoupdates | field check 2026-11-07: `TimersCalendar={ OnCalendar=*-*-* 06,18:00:00 ; next_elapse=… }` |
-| `firewall-cmd --query-*` exit codes and `--get-active-zones` layout | U | firewall | firewall-cmd(1), firewalld 2.3.1 |
-| `ss -H -ltn` output, `pgrep -a` output | U | ssh, network-migration | iproute2 / procps man pages (trixie) |
-| `nmcli -t -g` field output | U | network-migration | nmcli(1) 1.52.1 |
-| DHCP client binary paths (`/sbin/dhclient`, `udhcpc`, `dhcpcd`), dhcpcd.conf `clientid`/`iaid` semantics, dhclient6 `default-duid` encoding | U | network-migration | ifupdown 0.8.44 inet.defn, dhcpcd 10.1.0, isc-dhcp 4.4.3 |
-| NM keyfile keys `addr-gen-mode=eui64`, `dhcp-duid`, `dhcp-client-id` as written | U | network-migration | nm-settings-keyfile(5), nm-settings-nmcli(5) 1.52.1 |
-| Mirror masterlist `Archive-architecture` value format | U | mirrors | Mirrors.masterlist |
-| `ssh-keygen -l -f <file>` exit status on invalid keys | U | ssh | ssh-keygen(1) 10.0p1 |
-| go.dev `?mode=json&include=all` for pinned versions | U | go | go.dev/dl JSON |
-| uv pinned installer `https://astral.sh/uv/0.13.7/install.sh` | U | python | docs.astral.sh/uv installation |
-| `grdctl status` output format (`Status: enabled`, `(hidden)`) | U | remote-desktop | gnome-remote-desktop 48.1 grd-ctl.c |
-| `extrepo search` output (policy parsing) | U | repos | extrepo 0.14 source |
-| `mokutil --test-key` exit codes; `--generate-hash` reads the password from stdin when not a TTY | U | multimedia | mokutil 0.7.2 source |
-| NVIDIA Turing+ device-ID table derived from open-gpu-kernel-modules README at 620.70.06 (299 IDs, sha256 in `nvidia_ids.go`); Blackwell treated as ≥ 0x2900 | U | multimedia | that README; 550.163.01 README |
-| `isenkram-autoinstall-firmware -l` prints packages on stdout and exits 1 when nothing is missing | U | firmware-packages | isenkram 0.69+deb13u1 source |
-| `tee` writes to sysfs attributes (used because `sys.WriteFile` renames atomically, which sysfs doesn't support) | U | battery, thermal | coreutils tee(1); kernel sysfs ABI |
-| `ifup <iface>` exits 0 when the interface is already configured (the network-migration revert relies on it) | U | network-migration | ifupdown 0.8.44 ifup(8), source |
+| `firewall-cmd --query-*` returns 0 (`yes`) if true and 1 (`no`) otherwise, and 112 for INVALID_ZONE. `--get-active-zones` prints each zone name at the start of a line (the default zone gets a ` (default)` suffix), followed by indented `interfaces:`/`sources:` lines | V | firewall | firewall-cmd(1) firewalld 2.3.1 ("Returns 0 if true, 1 otherwise", EXIT CODES); field test 2026-11-07 (HP test machine) |
+| `ss -H` suppresses the header; `ss -H -ltn` lines are `LISTEN q q addr:port peer`, with `-p` adding `users:(("sshd",pid=…,fd=…))`. `pgrep -a` prints `pid cmdline` and exits 1 when nothing matches; names longer than 15 characters never match | V | ssh, network-migration | ss(8) iproute2 6.15.0; pgrep(1) procps 2:4.0.4-9 EXIT STATUS; field test 2026-11-07 (HP test machine) |
+| `nmcli -t -g A,B` prints the values only, colon-separated, one record per line (`wlo1:wifi:connected:kiln-wlo1`; `GENERAL.STATE` → `100 (connected)`) | V | network-migration | nmcli(1) 1.52.1; field test 2026-11-07 (HP test machine) |
+| ifupdown looks for `dhclient`, `udhcpc` and `dhcpcd` in that order (`execable()`). dhcpcd.conf `clientid`/`duid`/`iaid` are scoped globally or per `interface` block. dhclient writes `default-duid` as a quoted string with `\NNN` octal escapes by default, or as unquoted colon hex with `lease-id-format hex`; kiln reads both | V | network-migration | ifupdown 0.8.44+deb13u1 inet.defn; dhcpcd.conf(5) 10.1.0; isc-dhcp 4.4.3-P1-8 client/dhclient.c `write_duid`, common/print.c `format_lease_id`/`quotify_buf`; dhclient.conf(5) `lease-id-format` |
+| NM keyfile keys are the nm-settings-nmcli(5) property names in their setting's section, so `[ipv4] dhcp-client-id`, `[ipv6] addr-gen-mode`, `dhcp-duid` and `dhcp-iaid` are written as kiln does. NM honoured them on the test machine (same IPv4 and DHCPv6 address) | V | network-migration | nm-settings-keyfile(5) 1.52.1 FILE FORMAT; nm-settings-nmcli(5); field test 2026-11-07 (HP test machine) |
+| Mirror masterlist `Archive-architecture:` is a space-separated list of architecture names (`amd64 arm64 …`); 360 of 368 sites list amd64 | V | mirrors | mirror-master.debian.org/status/Mirrors.masterlist, fetched 2026-11-07 |
+| `ssh-keygen -l -f <file>` exits 0 for a file with at least one valid key and 255 (`fatal`: "… is not a public key file.") otherwise | V | ssh | openssh 1:10.0p1-7+deb13u4 ssh-keygen.c `do_fingerprint`; field test 2026-11-07 (HP test machine) |
+| go.dev `/dl/?mode=json&include=all` returns every release (369 on 2026-11-07, go1.27.3 included) as `{version, stable, files[{filename, os, arch, version, sha256, size, kind}]}` | V | go | go.dev/dl JSON, fetched 2026-11-07 |
+| uv's documented pinned installer is `https://astral.sh/uv/<version>/install.sh` ("Request a specific version by including it in the URL"); 0.13.7 redirects to releases.astral.sh and sets `APP_VERSION="0.13.7"` | V | python | docs.astral.sh/uv/getting-started/installation; the script itself, fetched 2026-11-07 |
+| `grdctl status` prints `RDP:` then tab-indented `Status: enabled|disabled` (ANSI bold only when stdout is a TTY), `TLS certificate:`, `TLS key:`, `Username:`/`Password:` as `(hidden)` or `(empty)`. grdctl run as the `gnome-remote-desktop` user uses the system daemon's settings; `--system` re-runs it via pkexec and exits 0 even when the child failed | V | remote-desktop | gnome-remote-desktop 48.1-4 src/grd-ctl.c `print_rdp_status`, `status_to_string`, `main` |
+| `extrepo search <re>` prints `Found <name>:` then a YAML dump of that entry (top-level keys unindented), and exits 1 with "No matches found". Entries carry `policy: <p>` or a `policies:` map of component → policy (289 and 44 entries in the trixie index) | V | repos | extrepo 0.14 Commands/Search.pm, Commands/Enable.pm; extrepo-data debian/trixie/index.yaml, fetched 2026-11-07 |
+| `mokutil --test-key` exits 0 with "… is not enrolled", 1 with "… is already enrolled / in db / in the enrollment request" or "… is blocked …", and 255 on errors. `--generate-hash` reads the password twice with `getline` and turns off echo only when stdin is a TTY | V | multimedia | mokutil 0.7.2-1 src/mokutil.c `test_key`, `print_skip_message`, `get_password`; src/util.c `read_hidden_line` |
+| NVIDIA open-module device-ID table: README.md at tag 620.70.06 (sha256 adb1d8f1…f170) lists 299 IDs, identical to `nvidia_ids.go`. All IDs up to 0x28F8 are Ada or older and all from 0x2901 are Blackwell (B200, GB200, RTX 50); the 550.163.01 README has none at or above 0x2900. RTX 2070 Super (1e84) is listed, GTX 970 (13c2) isn't | V | multimedia | github.com/NVIDIA/open-gpu-kernel-modules README.md at 620.70.06 and 550.163.01, re-derived 2026-11-07 |
+| `isenkram-autoinstall-firmware -l` echoes package names on stdout and every `info:` line on stderr; it exits 1 only when no loaded module requests firmware, else 0 (including "No new firmware package") | V | firmware-packages | isenkram 0.69+deb13u1 isenkram-autoinstall-firmware; field test 2026-11-07 (HP test machine) |
+| `tee <sysfs attr>` writes the value; an invalid value fails with "Invalid argument" and exit 1, and the attribute keeps its old value | V | battery, thermal | coreutils 9.7 tee(1); observed on `/sys/block/sda/queue/read_ahead_kb`, field test 2026-11-07 (HP test machine) |
+| `ifup <iface>` on an already configured interface warns "already configured" and exits 0; `ifdown` of one that isn't configured warns and exits 0 | V | network-migration | ifupdown 0.8.44+deb13u1 main.c; field test 2026-11-07 (HP test machine) |
 | `ss -H -l -t -n -p sport = :N` with the filter passed as separate argv words | V (observed) | ssh | field check 2026-11-07 |
-| `sshd -T` lists every `port` line (used to derive the firewall's SSH ports) | U | firewall, ssh | sshd(8) 10.0p1 |
+| `sshd -T` prints one `port N` line per configured port (and `listenaddress` lines) | V | firewall, ssh | sshd(8) 10.0p1; observed with a test config holding `Port 22` and `Port 2222`, field test 2026-11-07 (HP test machine) |
 
 ## Field observations (test machine 10.10.10.150, 2026-11-07)
 
