@@ -15,6 +15,7 @@ const (
 	chromeSources  = "/etc/apt/sources.list.d/extrepo_google_chrome.sources"
 	chromeDefaults = "/etc/default/google-chrome"
 	chromeOwnList  = "/etc/apt/sources.list.d/google-chrome.list"
+	chromeOwnSrc   = "/etc/apt/sources.list.d/google-chrome.sources" // newer packages write deb822
 )
 
 func doChrome(c *Ctx) error {
@@ -46,6 +47,8 @@ func doChrome(c *Ctx) error {
 		return errors.New("google-chrome-stable isn't installed after apt finished; check " + run.LogPath + " and run kiln again")
 	case run.Exists(chromeOwnList):
 		return fmt.Errorf("the Chrome package added its own %s next to extrepo's source; delete it and run kiln again", chromeOwnList)
+	case run.Exists(chromeOwnSrc):
+		return fmt.Errorf("the Chrome package added its own %s next to extrepo's source; delete it and run kiln again", chromeOwnSrc)
 	}
 	return nil
 }

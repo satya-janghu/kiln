@@ -30,7 +30,9 @@ func doCodecs(c *Ctx) error {
 		pkgs = append(pkgs, "nvidia-vaapi-driver")
 	}
 	if !run.Installed(c.S, "libavcodec-extra") {
-		c.Note("Codecs: libavcodec-extra replaces libavcodec61 with libavcodec-extra61 (expected; it provides libavcodec61, so nothing breaks).")
+		if run.Installed(c.S, "libavcodec61") {
+			c.Note("Codecs: libavcodec-extra replaces libavcodec61 with libavcodec-extra61 (expected; it provides libavcodec61, so nothing breaks).")
+		}
 	}
 	if err := c.Install(pkgs...); err != nil {
 		return err

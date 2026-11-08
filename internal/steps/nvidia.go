@@ -93,7 +93,9 @@ func doNVIDIA(c *Ctx) error {
 		}
 		// Same names as Debian's at higher versions, so apt picks NVIDIA's; no
 		// pinning package, so it follows the newest branch.
-		if err := c.Install("nvidia-driver", "nvidia-kernel-open-dkms"); err != nil {
+		// nvidia-driver-cuda brings libcuda1 and libnvcuvid1, and nvidia-smi is
+		// separate; containers (the Toolkit) and VA-API need them (forced, D55).
+		if err := c.Install("nvidia-driver", "nvidia-driver-cuda", "nvidia-kernel-open-dkms", "nvidia-smi"); err != nil {
 			return err
 		}
 	} else {

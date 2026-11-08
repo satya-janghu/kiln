@@ -35,8 +35,8 @@ The Linux text console (`TERM=linux`) of a freshly installed machine, usually be
 | `↑`/`↓` | move |
 | `space` | tick or untick (checklist) |
 | `enter` | start the run (checklist) |
-| `PgUp`/`PgDn` | scroll the output (progress, summary) |
-| `F3` or `ctrl+c` | quit. During a run it asks "Stop after the current step?"; kiln never kills apt or dpkg mid-install. |
+| `PgUp`/`PgDn` | scroll (summary) |
+| `Q` (also `Esc`, `ctrl+c`, `F3`) | quit. During a run it asks "Stop after the current step?"; kiln never kills apt or dpkg mid-install. The status bar says `Q`, because the Linux console's F3 code isn't recognised by Bubble Tea v2 (review, 2026-11-08). |
 
 ## 1. Checklist
 
@@ -55,7 +55,7 @@ The Linux text console (`TERM=linux`) of a freshly installed machine, usually be
 ```
 
 - One line of what was detected.
-- Every item is ticked. Items for missing hardware are not shown.
+- Every item is ticked. Items for missing hardware are not shown. If the list doesn't fit, "... N more below" / "more above" lines say so.
 - No sub-options, no forms, no filter.
 
 ## 2. Progress
@@ -79,7 +79,7 @@ The Linux text console (`TERM=linux`) of a freshly installed machine, usually be
 
 - Failures come first, each with what to do next.
 - With Secure Boot and NVIDIA, the MOK one-time password is shown here, once, with what to do at the next boot. It is not written anywhere.
-- Keys: `PgUp`/`PgDn` scroll, `ENTER` reboots when a reboot is needed, `F3` quits without rebooting.
+- Keys: `PgUp`/`PgDn` scroll, `ENTER` reboots when a reboot is needed, `Q` quits without rebooting. When a one-time password is shown, ENTER first asks "Did you write down the one-time password? Y/N".
 
 ## Gone
 

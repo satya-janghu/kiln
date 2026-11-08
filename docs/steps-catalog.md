@@ -288,7 +288,7 @@ Shown: always.
 Shown: always. From Google's repository through `extrepo`.
 1. Install `extrepo`; add `- non-free` under `enabled_policies:` in `/etc/extrepo/config.yaml` (default is only `main`).
 2. `extrepo enable google_chrome` → `/etc/apt/sources.list.d/extrepo_google_chrome.sources`, `Signed-By: /var/lib/extrepo/keys/google_chrome.asc`.
-3. `/etc/default/google-chrome` with `repo_add_once="false"` and `repo_reenable_on_distupgrade="false"`, so the package adds no duplicate `google-chrome.list`.
+3. `/etc/default/google-chrome` with `repo_add_once="false"` and `repo_reenable_on_distupgrade="false"`, so the package adds no duplicate source (`google-chrome.list`, or `google-chrome.sources` in newer packages).
 4. `apt-get update`, install `google-chrome-stable`.
 
 **Check:** `extrepo_google_chrome.sources` has `Enabled: yes`, `google-chrome-stable` is installed, and no `google-chrome.list` exists.
@@ -307,7 +307,7 @@ Steps:
 3. **NVIDIA's repository:**
    1. Download `https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb`; sha256 must be `d0d4ef986a44400f9db33c600ef33a985175e7cc63d805a10e1839c7a1e78f5f`. Extract `usr/share/keyrings/cuda-archive-keyring.gpg` with `dpkg-deb -x` (the package isn't installed); its fingerprint must be `02182E60104FCDC26EAE1B8597A5D4CB8793F200`. Install it as `/etc/apt/keyrings/nvidia-cuda.gpg` (0644). A mismatch fails the step: "NVIDIA's repository key changed; kiln needs an update".
    2. `/etc/apt/sources.list.d/nvidia-cuda.sources`: `Types: deb`, `URIs: https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/`, `Suites: /` (flat, no `Components:`), `Architectures: amd64`, `Signed-By: /etc/apt/keyrings/nvidia-cuda.gpg`. `apt-get update`.
-   3. Install `nvidia-driver nvidia-kernel-open-dkms` (no CUDA). Same names as Debian's at higher versions, so apt picks NVIDIA's; no `nvidia-driver-pinning-*`, so it follows the newest branch.
+   3. Install `nvidia-driver nvidia-driver-cuda nvidia-kernel-open-dkms nvidia-smi`. NVIDIA's plain driver set lacks `libcuda1`, `libnvcuvid1` and `nvidia-smi`, which containers (the Toolkit) and VA-API need (forced, D55). Same names as Debian's at higher versions, so apt picks NVIDIA's; no `nvidia-driver-pinning-*`, so it follows the newest branch.
 4. **Debian's 550:** install `nvidia-driver` from trixie, with Recommends (they bring `libcuda1` and `nvidia-smi`, which the Container Toolkit needs; forced, D55).
 5. If Secure Boot signing can't be prepared, the step fails and says the driver wasn't installed; nouveau stays.
 
@@ -334,6 +334,8 @@ Shown: on any machine with a system battery (`type=Battery`, `scope` not `Device
    - A plain POSIX sh script `/usr/local/sbin/battery-limit` (0755), with `battery-limit.service` (oneshot) and `battery-limit.timer`; none of them call kiln. The script loads `acpi_call` if needed and reads `capacity`: above 80, mode `0x0500` (charging off) through `/proc/acpi/call`; at 70 or below, mode `0x0000` (normal); otherwise nothing. Mode `0x0100` doesn't stop charging (field-tested); `0x0500` does (debian13-notes). On AC it sits near 80% and drops to 70% only when unplugged.
    - The timer runs the script 30 s after boot and every 60 s (`OnBootSec=30s`, `OnUnitActiveSec=60s`, `AccuracySec=1s`, since the 1 min default accuracy would stretch the interval to up to 2 min). Then `systemctl daemon-reload`, `systemctl enable --now battery-limit.timer`, and one `systemctl start battery-limit.service`.
 3. **Neither:** nothing is installed; the summary names the laptop (DMI vendor and model) and says to use the BIOS charge-limit option if it has one.
+
+**After a reboot:** DKMS builds `acpi_call` only for kernels whose headers are installed, so kiln also installs the running kernel's headers when Debian still has them. If the module still can't load (the full upgrade installed a newer kernel, or Secure Boot needs the key enrolled), kiln writes the script and timer anyway and adds a reboot reason. The timer's script loads the module itself after the reboot, so the limit starts on its own, with no second kiln run.
 
 **Check:** thresholds: both values read back as 70 and 80. HP: `acpi_call` is loaded, the timer is active, and one run of the service succeeded.
 

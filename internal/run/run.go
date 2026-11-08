@@ -17,6 +17,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // LogPath is the only file kiln leaves behind (D55).
@@ -344,20 +346,24 @@ func (s *S) Cleanup() {
 	}
 }
 
-// lineWriter splits output into lines.
+// lineWriter splits output into lines. stdout and stderr are copied by two
+// goroutines into the same writer, so it locks.
 type lineWriter struct {
+	mu   sync.Mutex
 	buf  []byte
 	emit func(string)
 }
 
 func (w *lineWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.buf = append(w.buf, p...)
 	for {
 		i := bytes.IndexAny(w.buf, "\r\n")
 		if i < 0 {
 			break
 		}
-		line := strings.TrimRight(string(w.buf[:i]), " \t")
+		line := clean(string(w.buf[:i]))
 		w.buf = w.buf[i+1:]
 		if line != "" {
 			w.emit(line)
@@ -367,10 +373,20 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 }
 
 func (w *lineWriter) flush() {
-	if len(w.buf) > 0 {
-		w.emit(string(w.buf))
-		w.buf = nil
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if l := clean(string(w.buf)); l != "" {
+		w.emit(l)
 	}
+	w.buf = nil
+}
+
+// clean drops terminal escape sequences and expands tabs, so tool output
+// can't break the screen layout.
+func clean(l string) string {
+	l = ansi.Strip(l)
+	l = strings.ReplaceAll(l, "\t", "    ")
+	return strings.TrimRight(l, " ")
 }
 
 // tailWriter keeps the last lines of output for error messages.

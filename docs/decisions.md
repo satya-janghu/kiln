@@ -511,7 +511,7 @@ Earlier the same day you also decided D50–D52 (no firewall, remote desktop, ne
 This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for the battery.
 
 **Found while writing the docs (2026-11-08):**
-- **Forced:** Debian's 550 driver brings `libcuda1` and `nvidia-smi` only as Recommends. kiln installs it with Recommends, or containers can't use the GPU.
+- **Forced:** Debian's 550 driver brings `libcuda1` and `nvidia-smi` only as Recommends. kiln installs it with Recommends, or containers can't use the GPU. For NVIDIA's repo driver (RTX 2070 Super), kiln also installs `nvidia-driver-cuda` and `nvidia-smi`, because the plain set has neither (review, 2026-11-08).
 - **Note:** NVIDIA's Container Toolkit doesn't list Debian 13 as supported (it says the Debian instructions should work). It gets tried on the RTX 2070 Super machine first.
 - **Approved** with "implement the final solution" (2026-11-08):
   1. **Swappiness 180.** zram is already used before disk because of swap priority (zram 100, disk swap negative). A high swappiness makes the kernel move idle memory into zram sooner, which frees RAM. The kernel docs allow 0–200 and only say "above 100" for zram.

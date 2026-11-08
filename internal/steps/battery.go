@@ -109,14 +109,35 @@ func batHP(c *Ctx, b string) error {
 			return fmt.Errorf("kiln couldn't prepare signing for the acpi_call module, which Secure Boot needs; fix that and run kiln again: %w", err)
 		}
 	}
-	if err := c.Install("linux-headers-amd64", "acpi-call-dkms"); err != nil {
+	// DKMS builds only for kernels whose headers are installed. The full
+	// upgrade may have installed a newer kernel than the running one, so add
+	// the running kernel's headers too when Debian still has them.
+	running, _ := c.Out("uname", "-r")
+	running = strings.TrimSpace(running)
+	pkgs := []string{"linux-headers-amd64"}
+	if running != "" && run.Available(c.S, "linux-headers-"+running) {
+		pkgs = append(pkgs, "linux-headers-"+running)
+	}
+	if err := c.Install(append(pkgs, "acpi-call-dkms")...); err != nil {
 		return err
 	}
+	// After a reboot (a new kernel, or the MOK enrollment), the timer's
+	// script loads the module itself, so the limit starts on its own.
+	afterReboot := false
 	if err := c.Run("modprobe", "acpi_call"); err != nil {
-		if c.F.SecureBoot {
-			return errors.New("the acpi_call module can't load until its signing key is enrolled: reboot, choose *Enroll MOK* at the boot screen, then run kiln again")
+		switch {
+		case c.F.SecureBoot:
+			afterReboot = true
+			c.Reboot("the battery limit starts after the reboot, once the signing key is enrolled (choose Enroll MOK at the boot screen)")
+		case running != newestKernel(c):
+			afterReboot = true
+			c.Reboot("the battery limit starts after the reboot into the new kernel")
+		default:
+			return fmt.Errorf("loading the acpi_call module failed; `dkms status` shows whether it was built. Fix that and run kiln again: %w", err)
 		}
-		return fmt.Errorf("loading the acpi_call module failed; `dkms status` shows whether it was built. Fix that and run kiln again: %w", err)
+	}
+	if afterReboot {
+		return batHPFiles(c, b, false)
 	}
 
 	// Probe with a read call before relying on it.
@@ -130,6 +151,12 @@ func batHP(c *Ctx, b string) error {
 		return fmt.Errorf("this HP's firmware didn't accept the battery charge command (it answered %q), so no limit was set", answer)
 	}
 
+	return batHPFiles(c, b, true)
+}
+
+// batHPFiles writes the module autoload file, the script and the timer, and
+// starts the timer. now: acpi_call is loaded, so run the script once and check.
+func batHPFiles(c *Ctx, b string, now bool) error {
 	if err := c.Write(hpModules, 0o644, "# Written by kiln: needed by "+hpScript+"\nacpi_call\n"); err != nil {
 		return err
 	}
@@ -159,11 +186,11 @@ WantedBy=timers.target
 `); err != nil {
 		return err
 	}
-	for _, args := range [][]string{
-		{"daemon-reload"},
-		{"enable", "--now", "battery-limit.timer"},
-		{"start", "battery-limit.service"},
-	} {
+	steps := [][]string{{"daemon-reload"}, {"enable", "--now", "battery-limit.timer"}}
+	if now {
+		steps = append(steps, []string{"start", "battery-limit.service"})
+	}
+	for _, args := range steps {
 		if err := c.Run("systemctl", args...); err != nil {
 			return fmt.Errorf("`systemctl %s` failed; `journalctl -u battery-limit` shows why: %w", strings.Join(args, " "), err)
 		}
@@ -171,7 +198,7 @@ WantedBy=timers.target
 	c.Note("Battery limit: %s runs every minute (battery-limit.timer) and keeps the battery between 70%% and 80%% with HP's charge command; plugged in, it stays near 80%%.", hpScript)
 
 	switch {
-	case !run.Exists("/sys/module/acpi_call"):
+	case now && !run.Exists("/sys/module/acpi_call"):
 		return errors.New("the acpi_call module isn't loaded; run `modprobe acpi_call` and kiln again")
 	case !c.OK("systemctl", "is-active", "--quiet", "battery-limit.timer"):
 		return errors.New("battery-limit.timer isn't active; `systemctl status battery-limit.timer` shows why")

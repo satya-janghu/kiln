@@ -61,6 +61,8 @@ type model struct {
 	sTop    int
 	reboot  bool // a reboot is needed
 	doBoot  bool // the user chose to reboot
+	secret  bool // a one-time password is on screen
+	confirm bool // "did you write the password down?"
 	quit    bool
 }
 
@@ -187,10 +189,20 @@ func (m *model) key(k string) tea.Cmd {
 			}
 			return nil
 		}
-		if k == "ctrl+c" || k == "esc" || k == "f3" {
+		if k == "ctrl+c" || k == "esc" || k == "f3" || k == "q" {
 			m.asking = !m.stopped.Load()
 		}
 	case scrSummary:
+		if m.confirm {
+			switch k {
+			case "y", "Y":
+				m.doBoot = true
+				return tea.Quit
+			case "n", "N", "esc":
+				m.confirm = false
+			}
+			return nil
+		}
 		switch k {
 		case "up", "k":
 			if m.sTop > 0 {
@@ -206,7 +218,9 @@ func (m *model) key(k string) tea.Cmd {
 		case "pgdown", "space", " ":
 			m.sTop += m.h / 2
 		case "enter":
-			if m.reboot {
+			if m.reboot && m.secret {
+				m.confirm = true
+			} else if m.reboot {
 				m.doBoot = true
 				return tea.Quit
 			}
@@ -260,7 +274,7 @@ func (m *model) viewChecklist() ([]string, string) {
 		"  Untick anything you don't want, then press ENTER to start.",
 		"",
 	}
-	rows := m.bodyH() - len(head)
+	rows := m.bodyH() - len(head) - 1 // one line for "more below"
 	if m.cursor < m.top {
 		m.top = m.cursor
 	}
@@ -284,7 +298,13 @@ func (m *model) viewChecklist() ([]string, string) {
 			body = append(body, "    "+box+" "+title+" "+cSecondary+desc+reset)
 		}
 	}
-	return body, "ENTER=Start  SPACE=Tick/untick  A=All/none  Up/Down=Move  F3=Quit"
+	if m.top > 0 {
+		body[len(head)-1] = "    " + cMuted + fmt.Sprintf("... %d more above", m.top) + reset
+	}
+	if more := len(m.items) - (m.top + rows); more > 0 {
+		body = append(body, "    "+cMuted+fmt.Sprintf("... %d more below (Down to see them)", more)+reset)
+	}
+	return body, "ENTER=Start  SPACE=Tick/untick  A=All/none  Up/Down=Move  Q=Quit"
 }
 
 func (m *model) viewRun() ([]string, string) {
@@ -319,9 +339,10 @@ func (m *model) viewRun() ([]string, string) {
 		// Too many steps for the screen: show the ones around the running one.
 		outH = 6
 		maxList := m.bodyH() - 3 - outH
+		// Center on the running step, or the last one that finished.
 		cur := 0
 		for i, l := range list {
-			if strings.Contains(l, "> running") {
+			if !strings.Contains(l, "waiting") {
 				cur = i
 			}
 		}
@@ -389,7 +410,13 @@ func (m *model) buildSummary(d doneMsg) {
 				s = append(s, "          "+cDanger+l+reset)
 			}
 		case steps.Skipped:
-			s = append(s, cMuted+"- skipped "+r.Title+" ("+r.Detail+")"+reset)
+			for i, l := range wrap(r.Title+" ("+r.Detail+")", m.w-16) {
+				lead := "- skipped "
+				if i > 0 {
+					lead = "          "
+				}
+				s = append(s, cMuted+lead+l+reset)
+			}
 		}
 	}
 	if len(d.notes) > 0 {
@@ -409,6 +436,7 @@ func (m *model) buildSummary(d doneMsg) {
 		s = append(s, cInfo+"i No reboot is needed."+reset)
 	}
 	if d.secret != "" {
+		m.secret = true
 		s = append(s, "", cWarning+"! WRITE THIS DOWN NOW: Secure Boot one-time password: "+cAccent+d.secret+reset,
 			"At the next boot choose \"Enroll MOK\", then \"Continue\", and type this password.",
 			"It is shown only here and is not saved anywhere.")
@@ -429,9 +457,11 @@ func (m *model) viewSummary() ([]string, string) {
 	for i := m.sTop; i < len(m.summary) && i < m.sTop+rows; i++ {
 		body = append(body, "  "+m.summary[i])
 	}
-	status := "Up/Down/PgUp/PgDn=Scroll  F3=Quit"
-	if m.reboot {
-		status = "ENTER=Reboot now  Up/Down/PgUp/PgDn=Scroll  F3=Quit without rebooting"
+	status := "Up/Down/PgUp/PgDn=Scroll  Q=Quit"
+	if m.confirm {
+		status = "Did you write down the one-time password? Y=Yes, reboot now  N=Back"
+	} else if m.reboot {
+		status = "ENTER=Reboot now  Up/Down/PgUp/PgDn=Scroll  Q=Quit without rebooting"
 	}
 	return body, status
 }

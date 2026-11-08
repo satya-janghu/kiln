@@ -68,6 +68,9 @@ func (s *S) apt(stdin string, args ...string) error {
 		if err == nil || !errors.As(err, &ee) || !strings.Contains(ee.Output, "Could not get lock") {
 			return err
 		}
+		if attempt == 3 {
+			break
+		}
 		s.Say("Another program is using apt; waiting a minute and trying again...")
 		select {
 		case <-s.ctx.Done():

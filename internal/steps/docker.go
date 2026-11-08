@@ -132,10 +132,13 @@ func doDocker(c *Ctx) error {
 	// 8. NVIDIA Container Toolkit, when the NVIDIA step will install a driver.
 	toolkit := c.Picked("nvidia") && nvidiaSource(c.F) != ""
 	if toolkit {
-		if err = installToolkit(c); err != nil {
-			return err
+		// Docker itself works without it, so a toolkit problem is a note.
+		if terr := installToolkit(c); terr != nil {
+			c.Note("NVIDIA Container Toolkit couldn't be set up, so containers can't use the GPU yet: %v", terr)
+			toolkit = false
+		} else {
+			c.Note("GPU containers work after the reboot that loads the NVIDIA driver.")
 		}
-		c.Note("GPU containers work after the reboot that loads the NVIDIA driver.")
 	}
 
 	// Check.

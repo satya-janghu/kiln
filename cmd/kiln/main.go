@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -82,6 +83,11 @@ func start() int {
 	}
 	if res.Reboot {
 		_ = logf.Sync()
+		// install.sh can't remove its temporary directory when the machine
+		// reboots under it, so kiln does.
+		if dir := filepath.Dir(os.Args[0]); strings.HasPrefix(dir, "/var/tmp/kiln.") {
+			_ = os.RemoveAll(dir) // #nosec G703 -- only install.sh's own /var/tmp/kiln.* directory
+		}
 		if err := tui.Reboot(); err != nil {
 			fmt.Fprintf(os.Stderr, "Reboot failed: %v. Run `systemctl reboot` yourself.\n", err)
 			return 1
