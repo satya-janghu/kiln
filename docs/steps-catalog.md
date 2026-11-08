@@ -7,7 +7,7 @@
 kiln is a one-time tool, run once at the console as root on a fresh Debian 13 amd64 install.
 
 - **The same checklist on every install,** GNOME or server, all ticked. Only hardware hides an item (NVIDIA, battery). No sub-options, no other questions; every value is fixed.
-- **Nothing is saved** and nothing of kiln keeps running, except the battery script and timer on HP laptops that need it (D56). The log is `/var/log/kiln.log`.
+- **Nothing is saved** and nothing of kiln keeps running, except the battery script and timer on HP laptops that need it (D56) and the weekly Docker prune timer (D61). The log is `/var/log/kiln.log`.
 - **Order:** the always-done items, then each ticked checkbox, one at a time, in the order below.
 - **A failed step doesn't stop the run.** Steps that need it are skipped with the reason; the rest continue.
 - **Running again is safe:** installing an installed package is a no-op, files are rewritten with the same content, services are enabled again. There is no "already done" detection.
@@ -194,14 +194,25 @@ Shown: always. From Docker's repository, following Docker's Debian install docs.
 2. `install -m 0755 -d /etc/apt/keyrings`; download `https://download.docker.com/linux/debian/gpg` to `/etc/apt/keyrings/docker.asc` (0644).
 3. `/etc/apt/sources.list.d/docker.sources`: `Types: deb`, `URIs: https://download.docker.com/linux/debian`, `Suites: trixie`, `Components: stable`, `Architectures: amd64`, `Signed-By: /etc/apt/keyrings/docker.asc`. `apt-get update`.
 4. Install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`.
-5. `/etc/docker/daemon.json` (no header): merge `{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}` into existing keys; `dockerd --validate --config-file /etc/docker/daemon.json` if `dockerd --help` lists `--validate`; restart docker if the file changed.
+5. `/etc/docker/daemon.json` (no header): merge these keys into the existing ones (D61), keeping every other key:
+   ```json
+   {
+     "log-driver": "json-file",
+     "log-opts": { "max-size": "10m", "max-file": "3", "compress": "true" },
+     "default-shm-size": "1G",
+     "default-address-pools": [ { "base": "172.16.0.0/12", "size": 24 } ]
+   }
+   ```
+   Check the new file with `dockerd --validate --config-file <file>` if `dockerd --help` lists `--validate`, then put it in place and restart docker if it changed. No `live-restore` (D61).
+   Then `/etc/sysctl.d/60-kiln-docker.conf`: `vm.max_map_count = 262144`, `vm.overcommit_memory = 1`, loaded with `sysctl -q -p`.
 6. `adduser <user> docker`. Wait up to 60 s for `docker info`, then `docker run --rm hello-world` as root.
 7. **Portainer CE:** a volume for its data and a container named `portainer` from `portainer/portainer-ce:lts`, publishing only 9443 (8000 is for Edge agents only, D55), with the Docker socket mounted and `--restart=always`, so it starts with the machine (commands: debian13-notes). If a container named `portainer` already exists, it is left alone.
-8. **NVIDIA Container Toolkit** (only when checkbox 17 is ticked and will install a driver for this card): NVIDIA's toolkit apt repository and key as a deb822 `.sources` file, the toolkit package, the NVIDIA runtime registered in `daemon.json` with `nvidia-ctk`, then restart docker (repository, key fingerprint and commands: debian13-notes). GPU containers work after the reboot that loads the driver.
+8. **Weekly prune** (D61): `/etc/systemd/system/kiln-docker-prune.service` (`Type=oneshot`, `After=docker.service`, `ExecStart=/usr/bin/docker image prune --all --force --filter until=168h`, then `ExecStart=/usr/bin/docker builder prune --all --force --filter until=168h`) and `kiln-docker-prune.timer` (`OnCalendar=Sun 04:00`, `RandomizedDelaySec=30m`, `Persistent=true`, `WantedBy=timers.target`); `systemctl daemon-reload`, `systemctl enable --now kiln-docker-prune.timer`. Volumes and stopped containers are never pruned; a stopped stack's images are, and re-pull on the next `up`.
+9. **NVIDIA Container Toolkit** (only when checkbox 17 is ticked and will install a driver for this card): NVIDIA's toolkit apt repository and key as a deb822 `.sources` file, the toolkit package, the NVIDIA runtime registered in `daemon.json` with `nvidia-ctk`, then restart docker, then merge kiln's keys from 5 again in case nvidia-ctk dropped any (repository, key fingerprint and commands: debian13-notes). GPU containers work after the reboot that loads the driver.
 
-**Check:** `docker info` works, hello-world ran, `docker inspect portainer` shows it running with restart policy `always`; with the toolkit, `docker info` lists the `nvidia` runtime.
+**Check:** `docker info` works, hello-world ran, `docker inspect portainer` shows it running with restart policy `always`. `docker create hello-world` gets `HostConfig.ShmSize` 1073741824 (then removed); a test network `kiln-pooltest` gets a subnet inside `172.16.0.0/12` (then removed). `sysctl -n` shows both values from `60-kiln-docker.conf`; `systemctl is-enabled kiln-docker-prune.timer` succeeds. With the toolkit, `docker info` lists the `nvidia` runtime.
 
-Summary notes: log out and back in for the docker group; the docker group is root-equivalent; "Portainer: open `https://<lan-ip>:9443` within 5 minutes of a boot and create the admin account; if it says the time ran out, run `docker restart portainer`" plus "Portainer may ask for a setup token first: it is in `docker logs portainer`" (D55; the 5-minute limit and the token are in debian13-notes). Not installed: lazydocker, What's Up Docker, Watchtower (archived).
+Summary notes: log out and back in for the docker group; the docker group is root-equivalent; "Portainer: open `https://<lan-ip>:9443` within 5 minutes of a boot and create the admin account; if it says the time ran out, run `docker restart portainer`" plus "Portainer may ask for a setup token first: it is in `docker logs portainer`" (D55; the 5-minute limit and the token are in debian13-notes); "Unused Docker images and build cache older than 7 days are pruned every Sunday (kiln-docker-prune.timer). Volumes are never touched." (D61). Not installed: lazydocker, What's Up Docker, Watchtower (archived).
 
 ### 9. Cockpit
 

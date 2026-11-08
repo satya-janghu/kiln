@@ -11,7 +11,7 @@ Cover:
 3. **Rules in `CLAUDE.md`** across the whole codebase:
    - grep for `bash -c`, `/tmp/`, secrets in argv, and non-atomic writes;
    - check that a failing step can't stop the run.
-4. **Simplicity (D54):** anything that saves state, keeps running after kiln exits (except D56's battery timer), asks extra questions, or exists only for re-runs.
+4. **Simplicity (D54):** anything that saves state, keeps running after kiln exits (except D56's battery timer and D61's Docker prune timer), asks extra questions, or exists only for re-runs.
 5. **Safety:** the refusal on non-Linux, non-root or non-Debian-13; SSH checked before reload; network loss mid-run.
 6. **Code quality:**
    - error handling;

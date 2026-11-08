@@ -27,7 +27,7 @@ Small and shellcheck-clean.
 6. If `/dev/tty` can be opened, it runs `"$tmp/kiln" "$@" </dev/tty`: the script came on stdin, so kiln reads the keyboard from the terminal. It runs kiln as a child, not with `exec`, so the trap still removes the directory.
 7. With no terminal, it says "run this from the machine's console" and exits non-zero.
 
-kiln is never installed and creates no `/etc/kiln` (D55). Afterwards the only trace is `/var/log/kiln.log`, plus the battery script and timer on HP laptops that need them (D56).
+kiln is never installed and creates no `/etc/kiln` (D55). Afterwards the only trace is `/var/log/kiln.log`, plus the battery script and timer on HP laptops that need them (D56) and the weekly Docker prune timer (D61).
 
 ## Releases (GoReleaser v2)
 

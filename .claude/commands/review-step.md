@@ -13,7 +13,7 @@ Compare the code with the item in `docs/steps-catalog.md`, the rules in `CLAUDE.
 - **Failure paths:** for each command that can fail, what state is the machine left in, and does the summary tell the owner what to do? Are the steps that need it skipped?
 - **Hardware:** AMD or Intel, NVIDIA (Turing+, Maxwell–Ada, older), laptop or desktop, Secure Boot on or off.
 - **Rules:** no `bash -c` with interpolation; apt non-interactive with confold and lock waiting; atomic file writes; downloads to `/var/tmp`; user commands via `runuser` with a clean environment; secrets never in argv or the log.
-- **Simplicity (D54):** flag anything that saves state, runs after kiln exits (except D56's battery timer), adds an option or question, or handles edge cases a fresh install never has.
+- **Simplicity (D54):** flag anything that saves state, runs after kiln exits (except D56's battery timer and D61's Docker prune timer), adds an option or question, or handles edge cases a fresh install never has.
 - **Unapproved decisions:** nothing relying on **Status: proposed**. Behaviour the catalog doesn't specify is a finding.
 - **Code quality:** error wrapping, context cancellation and timeouts, resource cleanup, unchecked errors, dead code; `make lint` clean.
 

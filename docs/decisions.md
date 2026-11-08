@@ -6,7 +6,7 @@ kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56**
 
 **What kiln is**
 - A one-time setup tool for a fresh Debian 13 amd64 install, run at the console as root (D54).
-- No questions beyond one checklist; every value is fixed (D55). Nothing is saved, and nothing of kiln keeps running. The one exception is the battery script and timer on laptops that need it (D56).
+- No questions beyond one checklist; every value is fixed (D55). Nothing is saved, and nothing of kiln keeps running. The two exceptions are the battery script and timer on laptops that need it (D56) and the weekly Docker prune timer (D61).
 - Go, one static binary, run with the one-liner `apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash` (D1, D14, D15, D58, D60). Three screens: checklist, progress, summary (D55), in the Okabe Night palette (D57).
 - The Debian installer decides GNOME or no desktop (D22, D29). kiln shows the **same checklist on every install**; only hardware hides an item (NVIDIA, battery) (D55).
 
@@ -14,7 +14,7 @@ kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56**
 - **Always:** safety check; wait for first-boot updates; deb822 sources with non-free and backports; full upgrade; firmware and microcode.
 - **Checkboxes, all ticked:**
   - sudo, system basics (zram = RAM), SSH, UFW + fail2ban, automatic updates, always-on, balanced power;
-  - Docker (+ Portainer, + NVIDIA Container Toolkit), Cockpit;
+  - Docker (+ Portainer, + NVIDIA Container Toolkit, + host defaults and a weekly prune, D61), Cockpit;
   - CLI and build tools, Node (your nvm script), Python, Go;
   - codecs and VA-API (all non-free), Flathub, Chrome;
   - NVIDIA (automatic), firmware updates with fwupd (D59), and the battery limit at 70–80% (D56).
@@ -573,6 +573,19 @@ apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilns
 - **`--connect-timeout 10` (forced):** your network can't reach one of GitHub's download servers (`185.199.109.133`). Plain curl waits about 135 s on it; with a 10 s connect timeout it moves to the next server after about 5 s (measured on the test box).
 - install.sh uses curl only (with `--connect-timeout 10 --retry 5 --retry-all-errors`); its wget path is gone.
 - With sudo: `sudo apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | sudo bash`.
+
+### D61 · 2026-11-08 · Docker host defaults for self-hosting
+
+**Status: decided** (your handoff from the homelab planning session, plus two answers on 2026-11-08). Part of checkbox 8 (Docker), no new checkbox. Per-service settings (`mem_limit`, `shm_size`, mounts, healthchecks, restart policies) stay in each compose file.
+
+- **`daemon.json`, merged into kiln's log settings** (other keys, such as nvidia-ctk's `runtimes`, are kept, whatever order the two write in):
+  - `log-opts.compress: "true"`: rotated logs are gzipped, same 10 MB × 3.
+  - `default-shm-size: "1G"`: Docker's 64 MB `/dev/shm` breaks browsers, Playwright and Postgres parallel queries. It's a tmpfs, so it only uses memory that is written, counted against the container's limit.
+  - `default-address-pools: [{"base": "172.16.0.0/12", "size": 24}]`: 4096 networks, and Docker never falls back to `192.168.x.0/20`, which collides with home routers' LANs. It applies to networks created afterwards (all of them on a fresh install).
+- **Sysctls** in `/etc/sysctl.d/60-kiln-docker.conf`: `vm.max_map_count = 262144` (Elasticsearch/OpenSearch refuse to start below it; the kernel default is 65530) and `vm.overcommit_memory = 1` (Redis's background saves; many self-hosted apps bundle Redis).
+- **Weekly prune, a second exception to "nothing keeps running"** (you chose this over a summary note): `kiln-docker-prune.service` and `.timer` run `docker image prune -af` and `docker builder prune -af`, both `--filter until=168h`, every Sunday at 04:00 (up to 30 min random delay, catching up after downtime). Volumes and stopped containers are never pruned. D55's rule now names two exceptions: the battery timer (D56) and this timer.
+- **Not adopted: `live-restore`** (you chose to skip it). Docker's docs say live-restore works only across patch releases, not major ones, after which the daemon "may not restore its connection" to running containers and they must be stopped by hand. kiln's automatic updates install major Docker releases too, so containers instead restart briefly at each Docker update and their restart policies bring them back.
+- **Not adopted (optional in the handoff):** `userland-proxy: false`, `metrics-addr`, `default-ulimits`.
 
 ## Proposals from the second verification pass
 

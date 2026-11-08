@@ -43,16 +43,8 @@ func doSystem(c *Ctx) error {
 	}
 
 	// sysctl: swappiness for zram, inotify limits for editors and file watchers.
-	var b strings.Builder
-	b.WriteString("# Managed by kiln\n")
-	for _, kv := range sysctlValues {
-		b.WriteString(kv[0] + " = " + kv[1] + "\n")
-	}
-	if err := c.Write(sysctlConf, 0o644, b.String()); err != nil {
+	if err := writeSysctl(c, sysctlConf, sysctlValues); err != nil {
 		return err
-	}
-	if err := c.Run("sysctl", "-q", "-p", sysctlConf); err != nil {
-		return fmt.Errorf("loading %s failed: %w", sysctlConf, err)
 	}
 
 	// journald: cap the journal at 500 MB.
@@ -75,13 +67,37 @@ func doSystem(c *Ctx) error {
 	if !zramLater && !zramActive() {
 		return fmt.Errorf("/dev/zram0 isn't in use as swap; see `journalctl -u systemd-zram-setup@zram0`")
 	}
-	for _, kv := range sysctlValues {
-		if got, _ := c.Out("sysctl", "-n", kv[0]); strings.TrimSpace(got) != kv[1] {
-			return fmt.Errorf("%s is %q, not %s; another file in /etc/sysctl.d may override %s", kv[0], strings.TrimSpace(got), kv[1], sysctlConf)
-		}
+	if err := checkSysctl(c, sysctlConf, sysctlValues); err != nil {
+		return err
 	}
 	if got, _ := c.Out("timedatectl", "show", "-p", "NTP", "--value"); strings.TrimSpace(got) != "yes" {
 		return fmt.Errorf("network time sync is still off; run `timedatectl set-ntp true` and check `systemctl status systemd-timesyncd`")
+	}
+	return nil
+}
+
+// writeSysctl writes a sysctl.d file and loads it now.
+func writeSysctl(c *Ctx, path string, values [][2]string) error {
+	var b strings.Builder
+	b.WriteString("# Managed by kiln\n")
+	for _, kv := range values {
+		b.WriteString(kv[0] + " = " + kv[1] + "\n")
+	}
+	if err := c.Write(path, 0o644, b.String()); err != nil {
+		return err
+	}
+	if err := c.Run("sysctl", "-q", "-p", path); err != nil {
+		return fmt.Errorf("loading %s failed: %w", path, err)
+	}
+	return nil
+}
+
+// checkSysctl confirms the live values match what path set.
+func checkSysctl(c *Ctx, path string, values [][2]string) error {
+	for _, kv := range values {
+		if got, _ := c.Out("sysctl", "-n", kv[0]); strings.TrimSpace(got) != kv[1] {
+			return fmt.Errorf("%s is %q, not %s; another file in /etc/sysctl.d may override %s", kv[0], strings.TrimSpace(got), kv[1], path)
+		}
 	}
 	return nil
 }

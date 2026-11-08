@@ -35,7 +35,7 @@ The full list, with exact behavior, is in [steps-catalog.md](steps-catalog.md) (
   - SSH with password logins for the user and root (D45);
   - UFW and fail2ban, automatic updates every 12 h with no automatic reboot;
   - always on (no sleep, lid ignored), balanced power profile;
-  - Docker with Portainer (and the NVIDIA Container Toolkit with an NVIDIA card), Cockpit;
+  - Docker with Portainer, self-hosting defaults and a weekly prune (and the NVIDIA Container Toolkit with an NVIDIA card), Cockpit;
   - CLI and build tools, Node (nvm), Python (uv and a venv), Go;
   - codecs and VA-API, Flathub, Google Chrome;
   - the NVIDIA driver, picked automatically;
@@ -45,7 +45,10 @@ The full list, with exact behavior, is in [steps-catalog.md](steps-catalog.md) (
 
 - Ordinary Debian configuration and packages. None of it needs kiln.
 - `/var/log/kiln.log`: every command, its exit code and its output. Secrets never go in it.
-- On laptops that need it, the battery script and its systemd timer (D56). They are plain files, not part of kiln. This is the only thing that keeps running.
+- On laptops that need it, the battery script and its systemd timer (D56).
+- With Docker, `kiln-docker-prune.timer`, which removes unused images and build cache every Sunday (D61).
+
+They are plain systemd files, not part of kiln, and the only things that keep running.
 
 Nothing else. No saved choices, no `/etc/kiln`, no kiln binary in `PATH`.
 

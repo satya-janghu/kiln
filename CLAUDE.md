@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Read this first: the small rewrite (2026-11-08)
 
-The owner found the first version over-engineered and chose a **small rewrite** (approach B in `docs/decisions.md` D54). **D55** (scope) and **D56** (battery) in `docs/decisions.md` are the plan. They override anything older in the docs or the code.
+The owner found the first version over-engineered and chose a **small rewrite** (approach B in `docs/decisions.md` D54). **D55** (scope) and **D56** (battery) in `docs/decisions.md` are the plan; later entries (D57–D61) refine it. They override anything older in the docs or the code.
 
 The rewrite is implemented (2026-11-08): `cmd/kiln`, `internal/detect`, `internal/run`, `internal/steps` (one file per item, list in `steps.go`), `internal/tui` (three screens, `theme.go` holds the Okabe Night tokens, D57). About 4,800 lines. The old tool is only in git history.
 
@@ -13,7 +13,7 @@ The rewrite is implemented (2026-11-08): `cmd/kiln`, `internal/detect`, `interna
 `kiln` is a **one-time setup tool** for a fresh **Debian 13 "trixie" amd64** install. The owner runs it once at the machine's console, as root, right after the Debian installer finishes. It installs the packages and writes the configuration (SSH included) that would otherwise be typed by hand on every homelab machine.
 
 - **One checklist, the same on every install** (GNOME or server). All items are ticked by default. There are no sub-options, and every value is fixed. Only hardware hides an item (NVIDIA card, battery).
-- **Nothing is saved, and nothing of kiln keeps running.** The one exception is D56's battery script and timer on laptops that need it. kiln leaves only its log at `/var/log/kiln.log`.
+- **Nothing is saved, and nothing of kiln keeps running.** The two exceptions are D56's battery script and timer on laptops that need it, and D61's weekly Docker prune timer. Otherwise kiln leaves only its log at `/var/log/kiln.log`.
 - **Rerunning is safe.** It isn't a feature: apt installs and file writes are naturally repeatable. There's no machinery for it.
 - The Debian installer decides GNOME or no desktop; kiln never changes that.
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,17 @@ const (
 	dockerKey     = "/etc/apt/keyrings/docker.asc"
 	dockerSources = "/etc/apt/sources.list.d/docker.sources"
 	daemonJSON    = "/etc/docker/daemon.json"
+
+	// Host-wide defaults for self-hosting (D61, debian13-notes section 8).
+	dockerShmSize  = "1G"
+	dockerShmBytes = "1073741824"
+	dockerPoolBase = "172.16.0.0/12"
+	dockerPoolSize = 24
+
+	dockerSysctlConf = "/etc/sysctl.d/60-kiln-docker.conf"
+	pruneService     = "/etc/systemd/system/kiln-docker-prune.service"
+	pruneTimer       = "/etc/systemd/system/kiln-docker-prune.timer"
+	poolTest         = "kiln-pooltest"
 
 	dockerSourcesContent = `# Managed by kiln
 # Docker CE (https://docs.docker.com/engine/install/debian/)
@@ -49,6 +61,37 @@ Suites: /
 Signed-By: /etc/apt/keyrings/nvidia-container-toolkit.asc
 `
 )
+
+// dockerSysctlValues: Elasticsearch/OpenSearch refuse to start below
+// 262144 map areas; Redis wants overcommit on for its background saves.
+var dockerSysctlValues = [][2]string{
+	{"vm.max_map_count", "262144"},
+	{"vm.overcommit_memory", "1"},
+}
+
+const pruneServiceContent = `# Written by kiln (D61)
+[Unit]
+Description=Remove unused Docker images and build cache older than 7 days
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker image prune --all --force --filter until=168h
+ExecStart=/usr/bin/docker builder prune --all --force --filter until=168h
+`
+
+const pruneTimerContent = `# Written by kiln (D61)
+[Unit]
+Description=Prune unused Docker images and build cache every Sunday
+
+[Timer]
+OnCalendar=Sun 04:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`
 
 var dockerPackages = []string{"docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin"}
 
@@ -91,8 +134,11 @@ func doDocker(c *Ctx) error {
 		return err
 	}
 
-	// 5. Log rotation in daemon.json.
-	if err = dockerLogConfig(c); err != nil {
+	// 5. daemon.json, and the host sysctls self-hosted apps want.
+	if err = dockerDaemonConfig(c); err != nil {
+		return err
+	}
+	if err = writeSysctl(c, dockerSysctlConf, dockerSysctlValues); err != nil {
 		return err
 	}
 
@@ -124,12 +170,26 @@ func doDocker(c *Ctx) error {
 		}
 	}
 
+	// 8. Weekly prune of unused images and build cache (never volumes).
+	if err = c.Write(pruneService, 0o644, pruneServiceContent); err != nil {
+		return err
+	}
+	if err = c.Write(pruneTimer, 0o644, pruneTimerContent); err != nil {
+		return err
+	}
+	for _, args := range [][]string{{"daemon-reload"}, {"enable", "--now", "kiln-docker-prune.timer"}} {
+		if err = c.Run("systemctl", args...); err != nil {
+			return fmt.Errorf("`systemctl %s` failed; `systemctl status kiln-docker-prune.timer` shows why: %w", strings.Join(args, " "), err)
+		}
+	}
+
 	c.Note("Log out and back in for %s's docker group membership to take effect.", u)
 	c.Note("The docker group is root-equivalent: anyone in it can control the whole machine.")
 	c.Note("Portainer: open https://%s:9443 within 5 minutes of a boot and create the admin account; if it timed out, run `docker restart portainer`.", addrForNotes(c))
 	c.Note("Portainer may ask for a setup token first: it is in `docker logs portainer` (the line with setup_token=).")
+	c.Note("Unused Docker images and build cache older than 7 days are pruned every Sunday (kiln-docker-prune.timer). Volumes are never touched.")
 
-	// 8. NVIDIA Container Toolkit, when the NVIDIA step will install a driver.
+	// 9. NVIDIA Container Toolkit, when the NVIDIA step will install a driver.
 	toolkit := c.Picked("nvidia") && nvidiaSource(c.F) != ""
 	if toolkit {
 		// Docker itself works without it, so a toolkit problem is a note.
@@ -148,6 +208,15 @@ func doDocker(c *Ctx) error {
 	st, err := c.Out("docker", "inspect", "-f", "{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}", "portainer")
 	if err != nil || strings.TrimSpace(st) != "true always" {
 		return fmt.Errorf("the portainer container isn't running with restart policy always (it shows %q); check `docker ps -a` and `docker logs portainer`", strings.TrimSpace(st))
+	}
+	if err = checkDockerDefaults(c); err != nil {
+		return err
+	}
+	if err = checkSysctl(c, dockerSysctlConf, dockerSysctlValues); err != nil {
+		return err
+	}
+	if !c.OK("systemctl", "is-enabled", "--quiet", "kiln-docker-prune.timer") {
+		return errors.New("kiln-docker-prune.timer isn't enabled; `systemctl status kiln-docker-prune.timer` shows why")
 	}
 	if toolkit {
 		rt, _ := c.Out("docker", "info", "-f", "{{json .Runtimes}}")
@@ -176,10 +245,43 @@ func dockerWait(c *Ctx) error {
 	return nil
 }
 
-// dockerLogConfig merges kiln's log settings into daemon.json, keeping every
-// other key, and restarts Docker if the file changed. The new file is checked
-// with `dockerd --validate` (when this dockerd has it) before it is put in place.
-func dockerLogConfig(c *Ctx) error {
+// checkDockerDefaults confirms new containers get the 1G /dev/shm and new
+// networks a subnet from kiln's pool. It uses the hello-world image already
+// pulled and a throwaway network, so it works on a rerun too.
+func checkDockerDefaults(c *Ctx) error {
+	id, err := c.Out("docker", "create", "hello-world")
+	if err != nil {
+		return fmt.Errorf("could not create a test container: %w", err)
+	}
+	id = strings.TrimSpace(id)
+	shm, _ := c.Out("docker", "inspect", "-f", "{{.HostConfig.ShmSize}}", id)
+	_ = c.Run("docker", "rm", id)
+	if strings.TrimSpace(shm) != dockerShmBytes {
+		return fmt.Errorf("new containers get a /dev/shm of %s bytes, not %s; check default-shm-size in %s", strings.TrimSpace(shm), dockerShmSize, daemonJSON)
+	}
+
+	if c.OK("docker", "network", "inspect", poolTest) {
+		_ = c.Run("docker", "network", "rm", poolTest)
+	}
+	if err := c.Run("docker", "network", "create", poolTest); err != nil {
+		return fmt.Errorf("could not create a test network: %w", err)
+	}
+	sub, _ := c.Out("docker", "network", "inspect", "-f", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", poolTest)
+	_ = c.Run("docker", "network", "rm", poolTest)
+	pool := netip.MustParsePrefix(dockerPoolBase)
+	first, _, _ := strings.Cut(strings.TrimSpace(sub), " ")
+	p, perr := netip.ParsePrefix(first)
+	if perr != nil || !pool.Contains(p.Addr()) {
+		return fmt.Errorf("a new Docker network got subnet %q, outside %s; check default-address-pools in %s", strings.TrimSpace(sub), dockerPoolBase, daemonJSON)
+	}
+	return nil
+}
+
+// dockerDaemonConfig merges kiln's settings into daemon.json, keeping every
+// other key (nvidia-ctk's runtimes, say), and restarts Docker if the file
+// changed. The new file is checked with `dockerd --validate` (when this
+// dockerd has it) before it is put in place.
+func dockerDaemonConfig(c *Ctx) error {
 	old := run.Read(daemonJSON)
 	m := map[string]any{}
 	if strings.TrimSpace(old) != "" {
@@ -194,7 +296,13 @@ func dockerLogConfig(c *Ctx) error {
 	}
 	lo["max-size"] = "10m" // log-opts values must be strings
 	lo["max-file"] = "3"
+	lo["compress"] = "true"
 	m["log-opts"] = lo
+	// 64 MB is too small for browsers, Playwright and Postgres; it's a tmpfs,
+	// so it only uses memory that is written, counted against the container.
+	m["default-shm-size"] = dockerShmSize
+	// /24s from one /12: 4096 networks, never 192.168.* (D61).
+	m["default-address-pools"] = []any{map[string]any{"base": dockerPoolBase, "size": dockerPoolSize}}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -257,8 +365,8 @@ func installToolkit(c *Ctx) error {
 	if err := dockerWait(c); err != nil {
 		return err
 	}
-	// Put the log settings back in case nvidia-ctk dropped them.
-	return dockerLogConfig(c)
+	// Put kiln's settings back in case nvidia-ctk dropped any.
+	return dockerDaemonConfig(c)
 }
 
 // armoredFingerprints returns the v4 fingerprints of the primary keys in an

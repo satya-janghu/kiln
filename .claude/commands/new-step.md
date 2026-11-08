@@ -11,7 +11,7 @@ Implement the catalog item `$ARGUMENTS`. This project has **no tests**, so don't
    - otherwise verify it now against a primary source (packages.debian.org/trixie, manpages.debian.org/trixie, sources.debian.org, release notes, upstream docs) and record it there with the URL;
    - if it can't be verified, stop and ask. Never write code from memory.
 3. Stop and ask if the item relies on anything with **Status: proposed**, or if implementing it reveals a choice the catalog doesn't settle. Present options; don't pick one.
-4. Keep it simple: plain commands with `exec.Command` arguments, atomic file writes, no options, no saved state, nothing that runs after kiln exits (D56's battery timer is the only exception). Every error says what failed and what to do next.
+4. Keep it simple: plain commands with `exec.Command` arguments, atomic file writes, no options, no saved state, nothing that runs after kiln exits (D56's battery timer and D61's Docker prune timer are the only exceptions). Every error says what failed and what to do next.
 5. Run `make build lint vuln` and fix everything.
 6. If the item installs packages, run `/check-packages $ARGUMENTS`.
 7. Update `docs/steps-catalog.md` and `docs/debian13-notes.md` if behaviour or facts changed.
