@@ -1,17 +1,18 @@
 # Distribution
 
-## The one-liner (D58, D60)
+## The one-liner (D58, D60, D62)
 
 **Always curl** (owner's rule, D60). Typed at the console of a freshly installed machine, as root (log in as root, or `su -`):
 
 ```bash
-apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash
+apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | bash
 ```
 
-With sudo already working: `sudo apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | sudo bash`.
+With sudo already working: `sudo apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | sudo bash`.
 
 - **`apt install -y curl` first:** curl is Priority `optional` in trixie, so a fresh install doesn't have it.
-- **`--connect-timeout 10`:** the owner's home network can't reach one of GitHub's four download servers (`185.199.109.133`, seen 2026-11-08 from the Mac and the test box). Without the timeout curl waits about 135 s on it; with it, curl moves to the next server after about 5 s.
+- **No `--connect-timeout`** (D62, kept short to type): the owner's home network can't reach one of GitHub's four download servers (`185.199.109.133`, seen 2026-11-08). When curl picks that one, this first fetch waits about 2 minutes before trying the next server, then carries on. install.sh and kiln keep their own timeouts, so only this fetch is affected.
+- **`https://` and `-fsSL` stay:** without `https://` the first request is plain HTTP and could be swapped for another script that runs as root; `-L` follows TinyURL's redirect and `-f` keeps an error page away from bash.
 - `https://tinyurl.com/kilnsetup` redirects to `https://github.com/satya-janghu/kiln/releases/latest/download/install.sh`, so it always gets the newest release's script. There's no website or GitHub Pages to maintain. Type the `https://`.
 - To run kiln again, for example after fixing a failed item, type the same command again.
 

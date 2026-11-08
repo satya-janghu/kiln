@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh: download kiln, check it, and run it once (docs/distribution.md).
 #
-#   apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash
+#   apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | bash
 #
 # Everything runs from main(), called on the last line, so a truncated
 # download runs nothing. kiln runs from a temporary directory that is removed
@@ -45,9 +45,9 @@ main() {
 	if [ "$(id -u)" -ne 0 ]; then
 		cat >&2 <<'EOF'
 kiln must run as root. Log in as root (or run `su -`), then run:
-  apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash
+  apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | bash
 If sudo already works, you can instead run:
-  sudo apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | sudo bash
+  sudo apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | sudo bash
 EOF
 		exit 1
 	fi

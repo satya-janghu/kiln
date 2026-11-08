@@ -7,7 +7,7 @@
   - The first run did everything except Chrome. A check bug failed it; it's fixed now.
   - The second run did every item, which confirms that running kiln twice is safe.
   - The battery limit works: at 97% on AC the battery reports "Not charging" (HP mode 0x0500).
-- **Published:** a public GitHub repo, a release with the binary, `checksums.txt` and `install.sh`, and the one-liner `apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash` (D58, D60).
+- **Published:** a public GitHub repo, a release with the binary, `checksums.txt` and `install.sh`, and the one-liner `apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | bash` (D58, D60, D62).
 - **Not yet run:**
   - a truly fresh install (the test box had been set up by the old kiln);
   - a GNOME machine;

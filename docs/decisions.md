@@ -7,7 +7,7 @@ kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56**
 **What kiln is**
 - A one-time setup tool for a fresh Debian 13 amd64 install, run at the console as root (D54).
 - No questions beyond one checklist; every value is fixed (D55). Nothing is saved, and nothing of kiln keeps running. The two exceptions are the battery script and timer on laptops that need it (D56) and the weekly Docker prune timer (D61).
-- Go, one static binary, run with the one-liner `apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash` (D1, D14, D15, D58, D60). Three screens: checklist, progress, summary (D55), in the Okabe Night palette (D57).
+- Go, one static binary, run with the one-liner `apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | bash` (D1, D14, D15, D58, D60, D62). Three screens: checklist, progress, summary (D55), in the Okabe Night palette (D57).
 - The Debian installer decides GNOME or no desktop (D22, D29). kiln shows the **same checklist on every install**; only hardware hides an item (NVIDIA, battery) (D55).
 
 **What it does** (D55 has the list)
@@ -563,6 +563,8 @@ This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for t
 
 ### D60 · 2026-11-08 · The one-liner is always curl
 
+*The `--connect-timeout 10` part is superseded by D62; the rest stands.*
+
 **Status: decided** (your instruction: "make this a curl command … ensure this remains a curl command always").
 
 ```bash
@@ -586,6 +588,18 @@ apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilns
 - **Weekly prune, a second exception to "nothing keeps running"** (you chose this over a summary note): `kiln-docker-prune.service` and `.timer` run `docker image prune -af` and `docker builder prune -af`, both `--filter until=168h`, every Sunday at 04:00 (up to 30 min random delay, catching up after downtime). Volumes and stopped containers are never pruned. D55's rule now names two exceptions: the battery timer (D56) and this timer.
 - **Not adopted: `live-restore`** (you chose to skip it). Docker's docs say live-restore works only across patch releases, not major ones, after which the daemon "may not restore its connection" to running containers and they must be stopped by hand. kiln's automatic updates install major Docker releases too, so containers instead restart briefly at each Docker update and their restart policies bring them back.
 - **Not adopted (optional in the handoff):** `userland-proxy: false`, `metrics-addr`, `default-ulimits`.
+
+### D62 · 2026-11-08 · A shorter one-liner, without the timeout
+
+**Status: decided** (your request: "something simple and short. I don't have to remember or type as much").
+
+```bash
+apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | bash
+```
+
+- **Dropped `--connect-timeout 10`.** The trade-off, accepted: when curl picks the GitHub server your network can't reach, this first fetch waits about 2 minutes before moving on, then works. install.sh (`--connect-timeout 10`) and kiln's own downloads keep their timeouts.
+- **Kept (forced):** `apt install -y curl &&`, because a fresh trixie install has no curl; `https://`, because a plain-HTTP first hop could be swapped for another script that runs as root; `-fsSL`, because `-L` follows TinyURL's redirect and `-f` keeps an error page from reaching bash.
+- With sudo: `sudo apt install -y curl && curl -fsSL https://tinyurl.com/kilnsetup | sudo bash`.
 
 ## Proposals from the second verification pass
 
