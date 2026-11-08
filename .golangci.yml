@@ -28,15 +28,15 @@ linters:
       - linters: [gosec]
         text: "G304"
       # kiln writes system config with Debian's standard modes (0644 files, 0755 dirs) on purpose;
-      # secrets and state are created 0600 explicitly (D41).
+      # the log is created 0600 explicitly.
       - linters: [gosec]
         text: "G301|G302|G306"
-      # internal/sys is the single, audited place that runs commands (rule 3); argv is never shell-interpreted.
-      - path: internal/(sys|runner|app)/
+      # Commands are argv lists, never shell-interpreted (CLAUDE.md).
+      - path: internal/(run|detect|steps|tui)/
         linters: [gosec]
         text: "G204"
-      # Check() turns read errors into "not done yet" on purpose: an unreadable file means the step must run.
-      - path: internal/(steps|battery|thermal|mirrors)/
+      # Detection treats unreadable files as "not present" on purpose.
+      - path: internal/(detect|steps)/
         linters: [nilerr]
 
 formatters:

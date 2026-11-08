@@ -1,6 +1,6 @@
 # Steps catalog
 
-**Source of truth for behavior** (rule 11). The plan is [decisions.md](decisions.md) D55 and D56; the run model is in [architecture.md](architecture.md). Facts the code relies on must be **V** in [debian13-notes.md](debian13-notes.md); "(verify: debian13-notes)" marks one that isn't yet, to be checked against a primary source before coding.
+**Source of truth for behavior** (rule 11). The plan is [decisions.md](decisions.md) D55 and D56; the run model is in [architecture.md](architecture.md). Facts the code relies on are recorded in [debian13-notes.md](debian13-notes.md). The code is in `internal/steps/`, one file per item.
 
 ## How a run works
 
@@ -23,9 +23,9 @@ Rules (architecture.md): apt is non-interactive (`DEBIAN_FRONTEND=noninteractive
 
 - Refuse unless `/etc/os-release` has `ID=debian`, `VERSION_ID=13`, `dpkg --print-architecture` is `amd64`, kiln runs as root ("Run it as root via `su -`, or with sudo") and a target user is found.
 - Under plain `su`, add `/usr/local/sbin:/usr/sbin:/sbin` to `PATH` (D53).
-- Install `ca-certificates` and `pciutils` if missing (P15).
 - Wait for first-boot automatic updates: `apt-daily.service` and `apt-daily-upgrade.service` inactive, then the dpkg lock free. Every apt call also passes `-o DPkg::Lock::Timeout=600` and retries on "Could not get lock".
-- If dpkg was left half-done (`dpkg --audit` prints anything), run `dpkg --configure -a`, then `apt-get -f install -y` (**proposed**, D55).
+- If dpkg was left half-done (`dpkg --audit` prints anything), run `dpkg --configure -a`, then `apt-get -f install -y` (D55). This comes before any install, because apt refuses to install while dpkg is half-done.
+- Then install `ca-certificates` and `pciutils` if missing (P15).
 
 ### Package sources
 
@@ -33,7 +33,7 @@ Rules (architecture.md): apt is non-interactive (`DEBIAN_FRONTEND=noninteractive
 2. Write `/etc/apt/sources.list.d/debian.sources`. Every stanza has `Types: deb`, `Components: main contrib non-free non-free-firmware` and `Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp`:
    - `URIs: http://deb.debian.org/debian`, `Suites: trixie trixie-updates`;
    - `URIs: http://security.debian.org/debian-security`, `Suites: trixie-security`;
-   - `URIs: http://deb.debian.org/debian`, `Suites: trixie-backports` (`NotAutomatic: yes`, so nothing comes from it without `-t trixie-backports`).
+   - `URIs: http://deb.debian.org/debian`, `Suites: trixie-backports`. Nothing comes from it without `-t trixie-backports`: the archive's own Release file says `NotAutomatic: yes` (sources.list(5) has no such field).
 3. `apt-get update`.
 
 **Check:** `apt-get update` succeeds and `sources.list` has no active lines.
@@ -81,8 +81,8 @@ Shown: always.
   zram-size = ram
   compression-algorithm = zstd
   ```
-  The size equals RAM (Debian's default is `min(ram / 2, 4096)`) (verify: debian13-notes). Then `systemctl daemon-reload`, `systemctl start dev-zram0.swap`; if zram was already active, the new size applies at next boot (note). The installer's disk swap stays as overflow.
-- **sysctl:** `/etc/sysctl.d/60-kiln.conf` with `vm.swappiness = 180` (**proposed**, D55; zram is already used before disk through swap priority, and a high value moves idle memory into it sooner), `fs.inotify.max_user_watches = 524288`, `fs.inotify.max_user_instances = 1024`; `sysctl -q -p` that file.
+  The size equals RAM (Debian's default is `min(ram / 2, 4096)`) Then `systemctl daemon-reload`, `systemctl start dev-zram0.swap`; if zram was already active, the new size applies at next boot (note). The installer's disk swap stays as overflow.
+- **sysctl:** `/etc/sysctl.d/60-kiln.conf` with `vm.swappiness = 180` (D55; zram is already used before disk through swap priority, and a high value moves idle memory into it sooner), `fs.inotify.max_user_watches = 524288`, `fs.inotify.max_user_instances = 1024`; `sysctl -q -p` that file.
 - **journald:** `/etc/systemd/journald.conf.d/60-kiln.conf` with `[Journal]` and `SystemMaxUse=500M`, then `systemctl restart systemd-journald`.
 - **Time sync:** install `systemd-timesyncd` (D7), `timedatectl set-ntp true`.
 
@@ -113,7 +113,7 @@ Shown: always.
 
 **UFW:**
 1. Install `ufw`.
-2. Default deny incoming, allow outgoing; allow `22/tcp` and `9090/tcp` from everywhere; then enable without the prompt, so it also starts at boot (verify: debian13-notes, the exact `ufw` commands, non-interactive enable and boot start).
+2. Default deny incoming, allow outgoing; allow `22/tcp`, and `9090/tcp` when Cockpit is ticked, from everywhere; then `ufw --force enable`, which also makes it start at boot.
 
 **fail2ban** (only when the SSH checkbox is also ticked; owner's answer in D54):
 1. Install `fail2ban python3-systemd`.
@@ -132,7 +132,7 @@ Shown: always.
    banaction = <fail2ban's ufw action>
    journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd + _COMM=sshd-session
    ```
-   Bans go through UFW, not Debian's default nftables action (verify: debian13-notes, the ufw action's name and whether it bans on all ports, as P9 had). trixie has no `/var/log/auth.log`, hence the systemd backend; the jail's `journalmatch` replaces the filter's, so it adds `_COMM=sshd-session`.
+   Bans go through UFW (`banaction = ufw` and `banaction_allports = ufw` in `[DEFAULT]`, and `banaction = ufw` in `[sshd]`), not Debian's default nftables action. trixie has no `/var/log/auth.log`, hence the systemd backend; the jail's `journalmatch` replaces the filter's, so it adds `_COMM=sshd-session`.
 3. `systemctl restart fail2ban`.
 
 **Check:** `ufw status verbose` shows active, deny incoming, allow outgoing and both rules; `fail2ban-client ping` answers `pong` and `fail2ban-client status sshd` runs.
@@ -171,7 +171,7 @@ Shown: always.
 - **Sleep:** `systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target`.
 - **logind:** `/etc/systemd/logind.conf.d/60-kiln-always-on.conf`: `[Login]`, `HandleLidSwitch=ignore`, `HandleLidSwitchExternalPower=ignore`, `HandleLidSwitchDocked=ignore`, `HandleSuspendKey=ignore`, `HandleSuspendKeyLongPress=ignore`, `HandleHibernateKey=ignore`, `HandleHibernateKeyLongPress=ignore`, `IdleAction=ignore`. `HandlePowerKey` stays poweroff. Then `systemctl reload systemd-logind`.
 - **GNOME only** (GNOME detected):
-  - `/etc/dconf/profile/user`: create with `user-db:user` and `system-db:local`, or add `system-db:local` if missing.
+  - Install `dconf-cli` (GNOME doesn't always bring it), then `/etc/dconf/profile/user`: create with `user-db:user` and `system-db:local`, or add `system-db:local` if missing.
   - `/etc/dconf/db/local.d/60-kiln-power`: `[org/gnome/settings-daemon/plugins/power]` with `sleep-inactive-ac-type='nothing'`, `sleep-inactive-battery-type='nothing'`, `power-button-action='interactive'` (P10).
   - `/etc/dconf/db/local.d/locks/60-kiln-power` listing those three keys, so users can't change them (D23). Then `dconf update`.
   - Greeter: in `/etc/gdm3/greeter.dconf-defaults` (ucf), uncomment or insert the two `sleep-inactive-*-type='nothing'` keys under the power header, then `systemctl reload gdm3`.
@@ -196,12 +196,12 @@ Shown: always. From Docker's repository, following Docker's Debian install docs.
 4. Install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`.
 5. `/etc/docker/daemon.json` (no header): merge `{"log-driver":"json-file","log-opts":{"max-size":"10m","max-file":"3"}}` into existing keys; `dockerd --validate --config-file /etc/docker/daemon.json` if `dockerd --help` lists `--validate`; restart docker if the file changed.
 6. `adduser <user> docker`. Wait up to 60 s for `docker info`, then `docker run --rm hello-world` as root.
-7. **Portainer CE:** a volume for its data and a container named `portainer` from `portainer/portainer-ce:lts`, publishing only 9443 (8000 is for Edge agents only, **proposed** D55), with the Docker socket mounted and `--restart=always`, so it starts with the machine (commands: debian13-notes). If a container named `portainer` already exists, it is left alone.
-8. **NVIDIA Container Toolkit** (only when checkbox 17 is ticked and will install a driver for this card): NVIDIA's toolkit apt repository and key as a deb822 `.sources` file, the toolkit package, the NVIDIA runtime registered in `daemon.json` with `nvidia-ctk`, then restart docker (verify: debian13-notes, repository URL, key, package names, configure command). GPU containers work after the reboot that loads the driver.
+7. **Portainer CE:** a volume for its data and a container named `portainer` from `portainer/portainer-ce:lts`, publishing only 9443 (8000 is for Edge agents only, D55), with the Docker socket mounted and `--restart=always`, so it starts with the machine (commands: debian13-notes). If a container named `portainer` already exists, it is left alone.
+8. **NVIDIA Container Toolkit** (only when checkbox 17 is ticked and will install a driver for this card): NVIDIA's toolkit apt repository and key as a deb822 `.sources` file, the toolkit package, the NVIDIA runtime registered in `daemon.json` with `nvidia-ctk`, then restart docker (repository, key fingerprint and commands: debian13-notes). GPU containers work after the reboot that loads the driver.
 
 **Check:** `docker info` works, hello-world ran, `docker inspect portainer` shows it running with restart policy `always`; with the toolkit, `docker info` lists the `nvidia` runtime.
 
-Summary notes: log out and back in for the docker group; the docker group is root-equivalent; "Portainer: open `https://<lan-ip>:9443` within 5 minutes of a boot and create the admin account; if it says the time ran out, run `docker restart portainer`" (**proposed**, D55; the 5-minute limit is in debian13-notes). Not installed: lazydocker, What's Up Docker, Watchtower (archived).
+Summary notes: log out and back in for the docker group; the docker group is root-equivalent; "Portainer: open `https://<lan-ip>:9443` within 5 minutes of a boot and create the admin account; if it says the time ran out, run `docker restart portainer`" plus "Portainer may ask for a setup token first: it is in `docker logs portainer`" (D55; the 5-minute limit and the token are in debian13-notes). Not installed: lazydocker, What's Up Docker, Watchtower (archived).
 
 ### 9. Cockpit
 
@@ -218,7 +218,7 @@ Summary note: "Cockpit: `https://<lan-ip>:9090`, with your user's password" (roo
 
 Shown: always.
 1. **gh** from GitHub's repository (D18): download `https://cli.github.com/packages/githubcli-archive-keyring.gpg`; its sha256 must be `6084d5d7bd8e288441e0e94fc6275570895da18e6751f70f057485dc2d1a811b` (a mismatch fails the step); install as `/etc/apt/keyrings/githubcli-archive-keyring.gpg` (0644). Write `/etc/apt/sources.list.d/github-cli.sources`: `Types: deb`, `URIs: https://cli.github.com/packages`, `Suites: stable`, `Components: main`, `Architectures: amd64`, `Signed-By:` that keyring. `apt-get update`.
-2. Install `build-essential git git-lfs gh curl wget jq vim neovim tmux htop btop ripgrep fd-find fzf bat tree unzip zip rsync lsof strace bind9-dnsutils iproute2 traceroute mtr-tiny netcat-openbsd cmake ninja-build pkgconf libssl-dev shellcheck bash-completion man-db` (`pkgconf`, not the transitional `pkg-config`), plus `autoconf automake libtool gdb` (verify: debian13-notes).
+2. Install `build-essential git git-lfs gh curl wget jq vim neovim tmux htop btop ripgrep fd-find fzf bat tree unzip zip rsync lsof strace bind9-dnsutils iproute2 traceroute mtr-tiny netcat-openbsd cmake ninja-build pkgconf libssl-dev shellcheck bash-completion man-db` (`pkgconf`, not the transitional `pkg-config`), plus `autoconf automake libtool gdb`.
 3. As the user: `mkdir -p ~/.local/bin`; symlinks `~/.local/bin/fd → /usr/bin/fdfind` and `~/.local/bin/bat → /usr/bin/batcat` (a regular file already there is left alone, with a note); `git lfs install --skip-repo`.
 
 **Check:** the packages are installed, `gh --version` runs, the links resolve, `git config --global --get filter.lfs.process` is set.
@@ -271,7 +271,7 @@ Shown: always. Non-free preferred for performance.
 - `libavcodec-extra` (it replaces `libavcodec61`; a note says so).
 - With GNOME only (the GStreamer plugins serve desktop apps): `gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav`.
 - VA-API: `vainfo` with any GPU; AMD → `mesa-va-drivers`; Intel → `intel-media-va-driver-non-free` (replaces `intel-media-va-driver` if GNOME pulled it in). Pre-Gen8 Intel isn't covered (note).
-- Any further non-free codec or VA-API package that applies (for example on NVIDIA cards) (verify: debian13-notes).
+- NVIDIA: `nvidia-vaapi-driver` when the NVIDIA item is ticked and will install a driver.
 
 **Check:** the selected packages are installed.
 
@@ -297,7 +297,7 @@ Shown: always. From Google's repository through `extrepo`.
 
 Shown: only with an NVIDIA GPU. The source is picked from the card, with no question (D39, D55). Generation comes from the PCI device ID:
 - **Turing and newer** (in the compiled-in Turing–Ada table from NVIDIA's open-gpu-kernel-modules README, or ID ≥ `0x2900` for Blackwell): NVIDIA's repository, newest branch, open kernel modules.
-- **Maxwell, Pascal, Volta:** Debian's `nvidia-driver` 550 (non-free; it supports Maxwell to Ada). Telling these apart from older cards needs an ID list (verify: debian13-notes, its source).
+- **Maxwell, Pascal, Volta:** Debian's `nvidia-driver` 550 (non-free; it supports Maxwell to Ada). Told apart from older cards by the ID list Debian's own `nvidia-detect` uses (`nv-readme.ids`, 405 IDs, compiled into kiln; debian13-notes).
 - **Older, including Kepler:** stays on nouveau with `firmware-nvidia-graphics`; summary note "this card is too old for a supported NVIDIA driver; it uses nouveau".
 - Several NVIDIA GPUs that no single source covers: skipped with a note.
 
@@ -309,23 +309,25 @@ Steps:
    2. `/etc/apt/sources.list.d/nvidia-cuda.sources`: `Types: deb`, `URIs: https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/`, `Suites: /` (flat, no `Components:`), `Architectures: amd64`, `Signed-By: /etc/apt/keyrings/nvidia-cuda.gpg`. `apt-get update`.
    3. Install `nvidia-driver nvidia-kernel-open-dkms` (no CUDA). Same names as Debian's at higher versions, so apt picks NVIDIA's; no `nvidia-driver-pinning-*`, so it follows the newest branch.
 4. **Debian's 550:** install `nvidia-driver` from trixie, with Recommends (they bring `libcuda1` and `nvidia-smi`, which the Container Toolkit needs; forced, D55).
-5. The installed set must include what the Container Toolkit needs (verify: debian13-notes).
+5. If Secure Boot signing can't be prepared, the step fails and says the driver wasn't installed; nouveau stays.
 
 A reboot is needed. **Check:** `dkms status` shows the module built for the installed kernel; for NVIDIA's repository, `apt-cache policy nvidia-driver` shows the installed version from `developer.download.nvidia.com`; with Secure Boot, `mokutil --test-key` says enrolled or pending.
 
 ### 18. Battery limit (70–80%)
 
-Shown: on any machine with a system battery (`type=Battery`, `scope` not `Device`). The goal is to keep the battery between 70% and 80% (D56). The first method that fits is used.
+Shown: on any machine with a system battery (`type=Battery`, `scope` not `Device`). The goal is to keep the battery between 70% and 80% (D56, all approved 2026-11-08). The first method that fits is used.
 
-1. **Kernel thresholds** (**proposed**, D56), when the battery offers `charge_control_end_threshold`: write start 70, then end 80 (thinkpad_acpi rejects an end below the current start), and read both back. `/etc/udev/rules.d/90-kiln-battery.rules` sets the same values whenever the battery appears (verify: debian13-notes, udev `ATTR{}` assignment for these files). No script or timer: the hardware enforces it. With GNOME, the summary says to leave *Preserve Battery Health* alone (turning it off resets the limit to 100% until next boot).
-2. **HP WMI** (HP's battery charge command, type `0x2B` through `\_SB.WMID.WMAA`, as on the HP Envy x360 13-ay0xxx), when the laptop is an HP and that ACPI method exists (verify: debian13-notes, how to detect it):
-   - Install `acpi-call-dkms` (verify: debian13-notes) and load `acpi_call` at boot through `/etc/modules-load.d/acpi_call.conf`. With Secure Boot on, the module is signed with the DKMS MOK and needs the same enrollment as checkbox 17 (verify: debian13-notes).
-   - A plain shell script `/usr/local/sbin/battery-limit`, with `battery-limit.service` (oneshot) and `battery-limit.timer`; none of them call kiln. It reads `capacity`: above 80, mode `0x0100` ("no charge", hold) through `/proc/acpi/call`; at 70 or below, mode `0x0000` (normal); otherwise nothing (verify: debian13-notes, the exact call string and that `0x0100` holds on AC). On AC it sits near 80% and drops to 70% only when unplugged.
-   - The timer runs the script at boot and every 60 s (**proposed**, D56; the alternative is 300 s).
-   - If `0x0100` turns out not to hold, the fallback (force discharge `0x0200` from 80% down to 70%, then normal) goes back to the owner first (**proposed**, D56).
-3. **Neither** (**proposed**, D56): nothing is installed; the summary names the laptop's DMI vendor and model and says to use the BIOS charge-limit option if it has one.
+1. **Kernel thresholds**, when the battery offers `charge_control_end_threshold`: write start 70, then end 80 (thinkpad_acpi rejects an end below the current start; if that order fails, end first, then start), and read both back. `/etc/udev/rules.d/90-kiln-battery.rules` sets the same values when the battery appears: one `SUBSYSTEM=="power_supply", ACTION=="add", KERNEL=="<battery>", ATTR{charge_control_start_threshold}="70"` rule, then the same with `ATTR{charge_control_end_threshold}="80"`. No script or timer: the hardware enforces it. With GNOME, the summary says to leave *Preserve Battery Health* alone (turning it off resets the limit to 100% until next boot).
+2. **HP WMI** (HP's battery charge command, type `0x2B` through `\_SB.WMID.WMAA`, as on the HP Envy x360 13-ay0xxx), when HP's WMI BIOS device `/sys/bus/wmi/devices/5FB7F034-2C63-45E9-BE91-3D44E2C707E4` exists:
+   - With Secure Boot on, first the same MOK enrollment as checkbox 17 (the DKMS module is signed with that key); if `acpi_call` can't load yet, the step fails with "reboot, enroll the key, run kiln again".
+   - Install `linux-headers-amd64 acpi-call-dkms`, `modprobe acpi_call`.
+   - **Probe** with a read call (`\_SB.WMID.WMAA 0 2 b53454355010000002b0000000400000000000000` to `/proc/acpi/call`, then read it back). It works only if the answer starts with "PASS" and return code 0 (`{0x50, 0x41, 0x53, 0x53, 0x00, 0x00, 0x00, 0x00`). Otherwise the summary gives the BIOS note (as in 3) and the step fails, saying the firmware didn't accept the command; nothing else is written.
+   - Load `acpi_call` at boot through `/etc/modules-load.d/acpi_call.conf`.
+   - A plain POSIX sh script `/usr/local/sbin/battery-limit` (0755), with `battery-limit.service` (oneshot) and `battery-limit.timer`; none of them call kiln. The script loads `acpi_call` if needed and reads `capacity`: above 80, mode `0x0500` (charging off) through `/proc/acpi/call`; at 70 or below, mode `0x0000` (normal); otherwise nothing. Mode `0x0100` doesn't stop charging (field-tested); `0x0500` does (debian13-notes). On AC it sits near 80% and drops to 70% only when unplugged.
+   - The timer runs the script 30 s after boot and every 60 s (`OnBootSec=30s`, `OnUnitActiveSec=60s`, `AccuracySec=1s`, since the 1 min default accuracy would stretch the interval to up to 2 min). Then `systemctl daemon-reload`, `systemctl enable --now battery-limit.timer`, and one `systemctl start battery-limit.service`.
+3. **Neither:** nothing is installed; the summary names the laptop (DMI vendor and model) and says to use the BIOS charge-limit option if it has one.
 
-**Check:** thresholds: both values read back as 70 and 80. HP: `acpi_call` is loaded, the timer is active, and one run of the script exits 0.
+**Check:** thresholds: both values read back as 70 and 80. HP: `acpi_call` is loaded, the timer is active, and one run of the service succeeded.
 
 ---
 

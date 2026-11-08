@@ -1,6 +1,6 @@
-# Release on v* tags: static checks, GoReleaser to GitHub Releases, then GitHub Pages
-# (install.sh at /kiln/i). Spec: docs/distribution.md, D14, D31. Tags are cut only
-# after review sign-off (docs/review-process.md). There are no tests by design (D30/D34).
+# Release on v* tags: static checks, then GoReleaser to GitHub Releases (the
+# binary, checksums.txt and install.sh). Spec: docs/distribution.md, D14.
+# There are no tests by design (D30/D34).
 name: release
 
 on:
@@ -43,8 +43,8 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-      - name: shellcheck install.sh scripts/field-check.sh
-        run: shellcheck install.sh scripts/field-check.sh
+      - name: shellcheck install.sh
+        run: shellcheck install.sh
 
   goreleaser:
     needs: checks
@@ -67,32 +67,3 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  pages:
-    needs: goreleaser
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    runs-on: ubuntu-latest
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Copy install.sh into the site (served as /kiln/i and /kiln/install.sh)
-        run: |
-          cp install.sh site/i
-          cp install.sh site/install.sh
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site/
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5

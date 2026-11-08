@@ -2,20 +2,21 @@
 
 ## Where things stand (2026-11-08)
 
-- **The first version is retired.** It works and was field-tested on the HP Envy x360 test box (10.10.10.150), but it was over-engineered: persistent helpers, saved state, re-run machinery, subcommands and too many options (D54).
-- **The rewrite is planned and not yet started.**
-  - **Scope:** D55 in [decisions.md](decisions.md).
-  - **Battery:** D56.
-  - **Behaviour:** [steps-catalog.md](steps-catalog.md).
-  - **Facts:** [debian13-notes.md](debian13-notes.md).
-- **Open items before or during the rewrite:**
-  1. **HP battery hold mode (`0x0100`):** a test was running on the test box on 2026-11-08 (discharge to 85%, then hold, then normal). If hold doesn't work, D56's fallback goes back to the owner.
-  2. **Battery check interval:** the owner suggested 300 s; 60 s is proposed (D56).
-  3. **The proposed package layout** in [architecture.md](architecture.md) needs the owner's OK.
-  4. **Facts marked U** in debian13-notes.md must become V before the code relies on them.
-- **Test box:** `acpica-tools` and `acpi-call-dkms` were installed on it during the battery investigation. It can be reinstalled freely.
+- **The small rewrite is done** (D54–D58): about 4,800 lines of Go, down from 18,500. `make lint` is clean on darwin and linux.
+- **Test box (HP Envy x360, server install):**
+  - The first run did everything except Chrome. A check bug failed it; it's fixed now.
+  - The second run did every item, which confirms that running kiln twice is safe.
+  - The battery limit works: at 97% on AC the battery reports "Not charging" (HP mode 0x0500).
+- **Published:** a public GitHub repo, a release with the binary, `checksums.txt` and `install.sh`, and the one-liner `wget -qO- https://tinyurl.com/kilnsetup | bash` (D58).
+- **Not yet run:**
+  - a truly fresh install (the test box had been set up by the old kiln);
+  - a GNOME machine;
+  - the NVIDIA machines (RTX 2070 Super, GTX 970);
+  - a ThinkPad (kernel thresholds);
+  - Secure Boot.
+- **Test box leftovers from the battery investigation:** `acpica-tools` and `/root/acpi`, `/root/hpbat-test*`. It can be reinstalled freely.
 
-## R1: Skeleton
+## R1: Skeleton (done)
 
 - Detection: hardware (CPU vendor, GPUs with PCI IDs, battery, Wi-Fi), GNOME or not, and the target user.
 - The safety check: Linux, root, Debian 13 amd64.
@@ -23,7 +24,7 @@
 - A runner that does each step in order, streams output to the screen and `/var/log/kiln.log`, records failures and skips the steps that need them.
 - `make build lint vuln` clean.
 
-## R2: Steps
+## R2: Steps (done)
 
 The items in [steps-catalog.md](steps-catalog.md), in catalog order. Old code from `internal/steps/*` is reused where it fits; the old framework (`sys.Recorder`, actions, options, state, revert, helpers) is removed.
 
@@ -35,6 +36,6 @@ The items in [steps-catalog.md](steps-catalog.md), in catalog order. Old code fr
 
 ## R4: Release
 
-- `install.sh`, the GitHub Pages short URL, GoReleaser v2 and the release workflow ([distribution.md](distribution.md)).
+- `install.sh`, the TinyURL one-liner, GoReleaser v2 and the release workflow ([distribution.md](distribution.md)): done.
 - An `/audit` pass with nothing left to fix, and both the owner and Claude sign off.
 - Tag `v1.0.0`.

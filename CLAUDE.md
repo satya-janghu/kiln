@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The owner found the first version over-engineered and chose a **small rewrite** (approach B in `docs/decisions.md` D54). **D55** (scope) and **D56** (battery) in `docs/decisions.md` are the plan. They override anything older in the docs or the code.
 
-The code in `internal/` today is the **old** tool. It has persistent helpers, `/etc/kiln` state, re-run machinery, subcommands, a plan preview, revert snapshots and many options. The docs now describe the new tool. Reuse old code only where it fits the new design: verified package lists, file contents and NVIDIA detection are worth keeping; the framework isn't.
+The rewrite is implemented (2026-11-08): `cmd/kiln`, `internal/detect`, `internal/run`, `internal/steps` (one file per item, list in `steps.go`), `internal/tui` (three screens, `theme.go` holds the Okabe Night tokens, D57). About 4,800 lines. The old tool is only in git history.
 
 ## What this is
 
@@ -51,7 +51,7 @@ Development happens on **macOS (Apple Silicon)**. The binary only ever runs on D
 
 - **Language:** Go 1.27, static binary (`CGO_ENABLED=0`).
 - **TUI:** Charm v2 (`charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`). Bubble Tea v2 is declarative: `View()` returns `tea.View` and keys arrive as `tea.KeyPressMsg`. Most examples online are v1, so follow `UPGRADE_GUIDE_V2.md` in the bubbletea repo.
-- **Release:** GoReleaser v2 to GitHub Releases; `install.sh` is served from GitHub Pages.
+- **Release:** GoReleaser v2 to GitHub Releases, with `install.sh` attached; the one-liner `wget -qO- https://tinyurl.com/kilnsetup | bash` points at it (D58).
 - Pinned versions are in `docs/decisions.md` D1.
 
 ## Commands

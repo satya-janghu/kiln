@@ -2,27 +2,30 @@
 
 Three screens: **checklist**, **progress**, **summary** (D55). Built with Bubble Tea v2, Bubbles v2 and Lip Gloss v2; versions are in [decisions.md](decisions.md). Most examples online are v1, so follow the v2 upgrade guide: `View()` returns a `tea.View`, keys arrive as `tea.KeyPressMsg`, and alt screen is a `View` field.
 
-## Look: Windows XP text-mode Setup (D42)
+## Look: Okabe Night (D57)
 
-| Element | kiln |
+The owner's palette, kept in [color-system.md](color-system.md) with its tokens in `color-tokens.json`: dark only and colorblind-safe (Okabe-Ito hues). The screens use its semantic tokens only (`internal/tui/theme.go`), never raw colors.
+
+| Element | Token |
 |---|---|
-| Background | ANSI blue `4`, every cell of the terminal |
-| Title | "kiln Setup" top-left, with a `═` rule under it (console: `=`) |
-| Text | light grey `7`; emphasis bright white `15`; warnings bright yellow `11` |
-| Panels | double-line border `╔═╗║╚╝` (console: `+=+|`) |
-| Progress bar | bright yellow `11` fill in a single-line frame, percentage above |
-| Selected row | inverse: light grey background, blue text |
-| Status bar | full-width light grey, black text. Left: key hints (`ENTER=Start  F3=Quit`). Right, after `│`: the current action, e.g. `Installing: docker-ce` |
-| Failures | bright red `9` with a `!!` marker |
+| Every cell | text `text.primary` `#EDF0F4` on `bg.canvas` `#090E13` |
+| Title "kiln Setup" | bold `primary.text`, with a `─` rule in `border.default` |
+| Descriptions, command output | `text.secondary`, `text.muted` |
+| Ticked box `[x]` | `primary.text`; unticked `[ ]` in `text.muted` |
+| Cursor row | `>` marker in `accent.text` on `bg.selected` |
+| Status bar | `text.secondary` on `bg.raised`; key names in bold `accent.text` |
+| Done / running / failed / reboot | `success.text` "+ done", `info.text` "> running", `danger.text` "x FAILED", `warning.text` "! A reboot is needed" |
 
-Only these 16 colors. Color is never the only signal: every status also has a marker.
+- **Color is never the only signal:** every status has a word and a marker (`+ done`, `> running`, `x FAILED`, `- skipped`, `! reboot`, `i` info), and the cursor has `>`.
+- **No red/green:** failures are vermilion, success is bluish green.
+- The tokens are truecolor. Bubble Tea downsamples them to what the terminal supports, so on the Linux console (16 colors) they become the nearest console colors and the words and markers still carry the meaning.
 
 ## Where it runs
 
 The Linux text console (`TERM=linux`) of a freshly installed machine, usually before anyone logs into a desktop.
 
 - **Size:** 80x24 minimum (D32); the VT's default 80x25 fits. Smaller shows one line: "Make the window at least 80x24". Larger sizes use the extra room for the output pane.
-- **Glyphs:** the console font has no braille, emoji or Nerd Font glyphs. With `TERM` `linux`, `vt100` or `dumb`, kiln uses ASCII: `[ ]` `[x]` `ok` `!!` `--`, a `| / - \` spinner and `+=|` borders.
+- **Glyphs:** the console font has no braille, emoji or Nerd Font glyphs, so kiln uses ASCII markers (`[ ]` `[x]` `>` `+` `x` `-` `!`) and only the `─` rule, which the console font has.
 - **Keyboard only.** No mouse needed.
 
 ## Keys
@@ -38,20 +41,17 @@ The Linux text console (`TERM=linux`) of a freshly installed machine, usually be
 ## 1. Checklist
 
 ```
- kiln Setup
- ══════════
-  HP ENVY x360 13 · AMD Ryzen 5 4500U · 8 GB · no desktop · battery · no NVIDIA
+ kiln Setup  one-time setup for Debian 13
+ ────────────────────────────────────────────────────────────────────────
+  This sets up HP ENVY x360 Convertible 13-ay0xxx (no desktop) for satya.
+  Always done: package sources, full upgrade, firmware and microcode.
+  Untick anything you don't want, then press ENTER to start.
 
-  Always done: safety check, package sources, full upgrade, firmware
-
-  [x] Passwordless sudo for satya
-  [x] System basics (zram, journal, inotify, time sync)
-  [x] SSH with password logins
-  [x] Firewall (UFW) and fail2ban
-  ...
-  [x] Battery limit (70-80%)
- ───────────────────────────────────────────────────────────────────────
-  ENTER=Start  SPACE=Toggle  F3=Quit
+  > [x] Passwordless sudo                Your user can use sudo without...
+    [x] System basics                    zram swap as big as RAM, log s...
+    ...
+    [x] Battery limit (70-80%)           Keeps the battery between 70%...
+ ENTER=Start  SPACE=Tick/untick  A=All/none  Up/Down=Move  F3=Quit
 ```
 
 - One line of what was detected.
@@ -60,10 +60,9 @@ The Linux text console (`TERM=linux`) of a freshly installed machine, usually be
 
 ## 2. Progress
 
-- The list of items with markers: pending, running, done, failed, skipped.
-- A progress bar: items done out of the total.
+- The list of items with markers: waiting, running, done, FAILED, skipped.
 - A live output pane with the current command's output, also written to `/var/log/kiln.log`.
-- The status bar shows the current action.
+- The status bar shows how many items are done out of the total.
 
 ## 3. Summary
 
@@ -80,7 +79,7 @@ The Linux text console (`TERM=linux`) of a freshly installed machine, usually be
 
 - Failures come first, each with what to do next.
 - With Secure Boot and NVIDIA, the MOK one-time password is shown here, once, with what to do at the next boot. It is not written anywhere.
-- Keys: `PgUp`/`PgDn`, `F3` quit. **Proposed:** `ENTER=Reboot` when a reboot is needed.
+- Keys: `PgUp`/`PgDn` scroll, `ENTER` reboots when a reboot is needed, `F3` quits without rebooting.
 
 ## Gone
 

@@ -51,16 +51,16 @@ From the old tool, none of this exists any more:
 - the allow-apply file and `--i-know-this-is-a-fresh-machine`;
 - `/etc/kiln/secrets/`.
 
-## Package layout (proposed)
+## Package layout
 
-**Status: proposed** (D55, "Found while writing the docs"). The owner approves structure.
+Approved with "implement the final solution" (D55, 2026-11-08) and implemented.
 
 ```
 cmd/kiln/        main: safety check, detect, start the TUI
 internal/detect/ hardware, desktop, target user (the only place that reads sysfs/procfs/dpkg)
 internal/run/    running commands, apt with its env and lock waits, atomic writes, downloads, the log
 internal/steps/  one file per checklist item, in catalog order
-internal/tui/    checklist, progress and summary screens
+internal/tui/    checklist, progress and summary screens; theme.go has the Okabe Night tokens (D57)
 ```
 
 No cobra, no `action` types, no options or state packages.

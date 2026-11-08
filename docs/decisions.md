@@ -7,7 +7,7 @@ kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56**
 **What kiln is**
 - A one-time setup tool for a fresh Debian 13 amd64 install, run at the console as root (D54).
 - No questions beyond one checklist; every value is fixed (D55). Nothing is saved, and nothing of kiln keeps running. The one exception is the battery script and timer on laptops that need it (D56).
-- Go, one static binary, installed with the one-liner (D1, D14, D15, D31). Three screens: checklist, progress, summary (D55), in the Windows XP Setup look (D42).
+- Go, one static binary, run with the one-liner `wget -qO- https://tinyurl.com/kilnsetup | bash` (D1, D14, D15, D58). Three screens: checklist, progress, summary (D55), in the Okabe Night palette (D57).
 - The Debian installer decides GNOME or no desktop (D22, D29). kiln shows the **same checklist on every install**; only hardware hides an item (NVIDIA, battery) (D55).
 
 **What it does** (D55 has the list)
@@ -113,7 +113,7 @@ YAML (`go.yaml.in/yaml/v4`) was removed by D27; state uses stdlib `encoding/json
 
 ### D15 · 2026-11-07 · Repository is `github.com/satya-janghu/kiln`
 
-**Status: decided** (your answer). Module path, release URLs and GoReleaser use it. Install URL moved to GitHub Pages (D31).
+**Status: decided** (your answer). Module path, release URLs and GoReleaser use it. Install URL: D58.
 
 ### D16 · Docker published ports are left reachable; kiln warns
 
@@ -177,7 +177,7 @@ YAML (`go.yaml.in/yaml/v4`) was removed by D27; state uses stdlib `encoding/json
 
 ### D31 · Short install URL on GitHub Pages
 
-**Status: decided** (your instruction, 2026-11-07). `wget -qO- https://satya-janghu.github.io/kiln/i | sudo bash`. Pages deploys from `site/` via the release workflow; `docs/` isn't published.
+**Superseded by D58** (TinyURL to the release's install.sh; no Pages).
 
 ### D32 · Responsive, console-safe TUI
 
@@ -261,9 +261,7 @@ Supersedes the former open question 1.
 
 ### D42 · 2026-11-07 · TUI look: Windows XP text-mode Setup
 
-**Status: decided** (your instruction and screenshot, 2026-11-07). Details in tui-design.md, "Look". Blue background, light grey text, double-line panels, yellow progress bar, light grey status bar with XP-style key hints, 16 console colors only.
-
-Flagged for your review: `F3` quits; inverse rows mark the selection; bright red marks failed steps; console fallback uses `+=|` borders.
+**Superseded by D57** (Okabe Night palette). Was: blue background, light grey text, double-line panels, 16 console colors only. The XP-style key hints in the status bar and `F3` to quit carry over.
 
 ## Implementation notes (2026-11-07)
 
@@ -382,7 +380,7 @@ Observations are in debian13-notes.md, "Field observations".
 
 ### D54 · 2026-11-07 · Direction reset: kiln is a one-time setup tool
 
-**Status: decided.** You chose approach **B (small rewrite)** on 2026-11-08; the scope is proposed in D55. This is your direction from the end of the 2026-11-07 session. Read it before any other entry: where an older entry conflicts with it, this one wins.
+**Status: decided.** You chose approach **B (small rewrite)** on 2026-11-08; the scope is D55, and it's implemented. This is your direction from the end of the 2026-11-07 session. Read it before any other entry: where an older entry conflicts with it, this one wins.
 
 **What you said kiln is (decided):**
 - A **one-time** tool. You run it once on a fresh Debian install and never have to deal with it again. It is not something that lives on the machine, keeps running, or gets re-run to manage the system.
@@ -515,7 +513,7 @@ This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for t
 **Found while writing the docs (2026-11-08):**
 - **Forced:** Debian's 550 driver brings `libcuda1` and `nvidia-smi` only as Recommends. kiln installs it with Recommends, or containers can't use the GPU.
 - **Note:** NVIDIA's Container Toolkit doesn't list Debian 13 as supported (it says the Debian instructions should work). It gets tried on the RTX 2070 Super machine first.
-- **Proposed:**
+- **Approved** with "implement the final solution" (2026-11-08):
   1. **Swappiness 180.** zram is already used before disk because of swap priority (zram 100, disk swap negative). A high swappiness makes the kernel move idle memory into zram sooner, which frees RAM. The kernel docs allow 0–200 and only say "above 100" for zram.
   2. **Portainer:** publish only 9443 and drop 8000, which only Edge agents use. Portainer stops if its admin account isn't created within 5 minutes of starting, so the summary says to open it within 5 minutes after a boot, or run `docker restart portainer` if the window passed.
   3. **At start,** if a previous run died mid-install (`dpkg --audit` reports something), run `dpkg --configure -a` once, so running again stays safe. One command.
@@ -524,7 +522,7 @@ This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for t
 
 ### D56 · 2026-11-08 · Battery held between 70% and 80%, including on the HP Envy
 
-**Status: decided** (your instruction, 2026-11-08), except the points marked **proposed**.
+**Status: decided** (your instruction, 2026-11-08; the points first proposed below were approved the same day).
 
 **What you asked for:** an option to keep the battery between 70% and 80%, including on laptops like the HP Envy x360 13-ay0xxx (Ryzen 5 4500U) that have no BIOS option and no Linux charge-limit control.
 
@@ -533,21 +531,31 @@ This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for t
 - Its firmware has an undocumented HP WMI command, "battery charge operation": command type `0x2B`, reached through `\_SB.WMID.WMAA`. The ACPI method is `SBCO` in SSDT6, and it writes the EC bits `WACL`, `SBIS`, `SBTC` and `BTNO`. It's reachable with the `acpi_call` module (Debian `acpi-call-dkms` 1.2.2-2.1; Secure Boot is off on this box).
   - Mode `0x0000` is normal charging (verified).
   - Mode `0x0200` is force discharge: the laptop runs on battery while plugged in (verified: 100% → 96%; going back to normal works at once).
-  - Mode `0x0100` is "no charge", expected to hold the charge while running on AC. **Not yet proven**: at 96% the battery's own hysteresis made it look the same as normal. A deeper test (discharge to 85%, then compare) is running.
+  - Mode `0x0100`, expected to be "no charge", does **not** stop charging: field-tested, the battery kept charging on AC as in normal mode.
+  - Mode `0x0500` stops charging on AC (verified on the test box). kiln uses it for "charging off".
 
 **Decided behaviour:**
 - One checkbox, "Battery limit (70–80%)", shown on any machine with a battery.
 - On the HP method: kiln installs `acpi-call-dkms` and writes a plain shell script plus a systemd timer. They are not part of kiln.
-  - Above 80%: switch charging off (hold).
-  - At 70% or below: switch it back on.
+  - Above 80%: switch charging off (mode `0x0500`, hold).
+  - At 70% or below: switch it back on (mode `0x0000`).
   - On AC with charging off, the battery barely drains, so in practice it sits near 80% and only drops to 70% when unplugged.
 - This is the **one exception** to "nothing keeps running" (D54), at your request: a small script and timer that stay on the laptops that need it.
 
-**Proposed:**
-- **Check every 60 s rather than 300 s.** Reading the battery level costs nothing, and at 300 s a charging battery can overshoot 80% by a few percent before the next check. 60 s keeps it within about a percent.
-- **Laptops whose kernel offers `charge_control_end_threshold`** (e.g. ThinkPads): set end 80 / start 70 with one udev rule, with no script or timer, because the hardware enforces it itself. The ThinkPad E14 Gen 5 AMD can also use its BIOS option (D55).
+**Approved (2026-11-08), first proposed here:**
+- **Check every 60 s rather than 300 s.** Reading the battery level costs nothing, and at 300 s a charging battery can overshoot 80% by a few percent before the next check. 60 s keeps it within about a percent. (The timer sets `AccuracySec=1s`, forced: systemd's 1 min default accuracy would stretch the interval to up to 2 min.)
+- **Laptops whose kernel offers `charge_control_end_threshold`** (e.g. ThinkPads): set end 80 / start 70 with a udev rule, with no script or timer, because the hardware enforces it itself. The ThinkPad E14 Gen 5 AMD can also use its BIOS option (D55).
+- **HP detection and probe:** the HP method is used when HP's WMI BIOS device (`/sys/bus/wmi/devices/5FB7F034-…`) exists, and only after a read call through `acpi_call` answers "PASS"; if it doesn't, the step fails with the BIOS note.
 - **No method found:** the summary says to use the BIOS option if the laptop has one.
-- **If mode `0x0100` turns out not to hold:** fall back to force discharge from 80% down to 70%, then normal charging. That cycles the battery shallowly instead of holding it, so I'd bring it back to you first.
+- The force-discharge fallback that was proposed in case `0x0100` didn't hold is not needed: `0x0500` holds.
+
+### D57 · 2026-11-08 · TUI palette: Okabe Night
+
+**Status: decided** (your instruction, 2026-11-08). The screens use the Okabe Night palette you supplied (docs/color-system.md, docs/color-tokens.json): dark only, colorblind-safe, semantic tokens only, every status with a word and a marker. This replaces D42's Windows XP blue look. Truecolor tokens are downsampled by Bubble Tea on terminals with fewer colors, such as the Linux console.
+
+### D58 · 2026-11-08 · One-liner on a TinyURL, install.sh attached to releases
+
+**Status: decided** (your instruction: "host it on an easy-to-type URL ... tiny URL"). `wget -qO- https://tinyurl.com/kilnsetup | bash`. The TinyURL points at `https://github.com/satya-janghu/kiln/releases/latest/download/install.sh`; GoReleaser attaches install.sh to each release, so GitHub Pages and `site/` are gone. The repo is public on GitHub so a fresh machine can download without logging in.
 
 ## Proposals from the second verification pass
 

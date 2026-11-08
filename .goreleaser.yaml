@@ -1,5 +1,5 @@
 # GoReleaser v2 config. Spec: docs/distribution.md, D14 (checksums.txt), D15 (repo).
-# Validate locally with `make release-check`. Releases are cut only after review sign-off.
+# Validate locally with `make release-check`. 
 version: 2
 
 project_name: kiln
@@ -35,3 +35,7 @@ release:
   github:
     owner: satya-janghu
     name: kiln
+  # install.sh rides along, so the one-liner's short URL points at
+  # releases/latest/download/install.sh (docs/distribution.md).
+  extra_files:
+    - glob: ./install.sh
