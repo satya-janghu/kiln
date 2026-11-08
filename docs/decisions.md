@@ -6,7 +6,7 @@ Where an older entry conflicts with D54, D54 wins.
 
 **Scope and direction**
 - kiln is a one-time setup tool for fresh Debian 13 installs; it should leave nothing running and ask few questions (D54).
-- **Approach B: a small rewrite (D54, decided 2026-11-08).** Its scope, which steps and options survive, is proposed in D55.
+- **Approach B: a small rewrite (D54), scope decided in D55 (2026-11-08).** D55 overrides anything below that conflicts with it.
 - No profiles or headless mode; the wizard is the only way to apply (D27, D33).
 - Run at the console in person; risky changes are checked and reverted in-process (D28).
 - TUI: responsive, console-safe (D32), Windows XP text-mode Setup look (D42).
@@ -449,51 +449,81 @@ Earlier the same day you also decided D50–D52 (no firewall, remote desktop, ne
 
 ### D55 · 2026-11-08 · Rewrite scope
 
-**Status: proposed** (my recommendation, 2026-11-08; waiting for your cuts).
+**Status: decided** (your answers, 2026-11-08). Items marked *verify* are facts to check against primary sources while implementing, not open choices.
 
-**Shape:** Go, one static binary, the same one-liner install. Three screens: a checklist, progress with live output, and a summary. The only choices are the step checkboxes; every value below is fixed. GNOME-only items appear only when GNOME is detected. Nothing is saved, nothing keeps running, and kiln leaves nothing of its own behind except one log of the run (`/var/log/kiln.log`). If a run fails halfway, running it again is safe, because apt installs and file writes are naturally repeatable. There is no special machinery for that.
+**Shape:**
+- Go, one static binary, the same one-liner install.
+- Three screens: a checklist, progress with live output, and a summary. The checkboxes are the only choices; every value is fixed. All checkboxes are ticked by default.
+- **The same checklist on every install, GNOME or server.** Only hardware hides an item: the NVIDIA items need an NVIDIA card.
+- Nothing is saved and nothing of kiln keeps running. The only thing left is one log of the run (`/var/log/kiln.log`).
+- If a run fails halfway, running it again is safe.
 
-**Always done, no checkbox:** a safety check that refuses unless the machine runs Debian 13 amd64 and kiln is started as root, then waits for first-boot automatic updates to finish. Then the package sources in deb822 (main, contrib, non-free, non-free-firmware, security, updates, backports), a full upgrade, and the firmware and CPU microcode for the detected hardware.
+**Always done, no checkbox:**
+- A safety check: refuse unless the machine runs Debian 13 amd64 and kiln runs as root, then wait for first-boot automatic updates to finish.
+- The package sources in deb822: main, contrib, non-free, non-free-firmware, security, updates, backports.
+- A full upgrade.
+- Firmware and CPU microcode for the detected hardware.
 
-**Checkboxes, all ticked by default** (revised 2026-11-08 to be one per thing the owner might want or not):
-1. Passwordless sudo for your user, working without logging out.
-2. System basics: zram swap, a 500 MB journal cap, raised inotify limits, time sync.
-3. SSH: install and start the server; password logins for your user and root; root gets your password if it has none.
-4. fail2ban: 1 h ban, increasing on repeats, after 5 failed SSH logins.
-5. Automatic updates: every package from every source, every 12 h, never an automatic reboot.
-6. Always on: no sleep, the lid ignored, GNOME's sleep settings set to never.
-7. Balanced power profile: tuned without GNOME, power-profiles-daemon with it.
-8. Battery limit at 80% (only when a battery supports it): one udev rule.
-9. Docker: from Docker's repo, your user in the docker group, logs at 10 MB × 3.
-10. Cockpit: web admin on port 9090. It pulls in NetworkManager, PackageKit and udisks2.
-11. Command-line tools: gh (GitHub's repo), git, build-essential, vim and neovim, tmux, htop and btop, ripgrep, fzf and about 20 more.
-12. Node.js: nvm and Node 26 for your user.
-13. Python: dev packages, uv, a venv at `~/.venvs/automation` with scraping and automation libraries, Playwright Chromium, ruff, pre-commit and httpie.
-14. Go: latest from go.dev, plus gopls, dlv, staticcheck and govulncheck.
-15. Codecs and video acceleration (GNOME only).
-16. Flathub in GNOME Software (GNOME only).
-17. Google Chrome (GNOME only).
-18. NVIDIA driver (only with an NVIDIA GPU): NVIDIA's for Turing and newer, Debian's 550 for Maxwell to Ada; older cards stay on nouveau. MOK enrollment is queued with Secure Boot.
+**Checkboxes:**
+1. **Passwordless sudo** for your user, working without logging out.
+2. **System basics:**
+   - zram swap **equal to RAM** (zstd), with a high swappiness so zram is used before disk (*verify* the value in the kernel's vm docs); the installer's disk swap stays as overflow;
+   - a 500 MB journal cap, raised inotify limits, time sync.
+3. **SSH:**
+   - install and start the server;
+   - password logins for your user and root;
+   - root gets your password if it has none (you'll always have a root user, but the check stays).
+4. **Firewall and fail2ban:**
+   - UFW, enabled: deny incoming, allow outgoing, allow 22/tcp (SSH) and 9090/tcp (Cockpit) **from everywhere**;
+   - fail2ban bans after 5 failed SSH logins, 1 h and increasing, through UFW (*verify* fail2ban's ufw action);
+   - published Docker ports bypass UFW, as Docker's docs say; left as Docker does, with a summary note (bind to 127.0.0.1 to keep one private).
+5. **Automatic updates:** every package, every 12 h, never an automatic reboot.
+6. **Always on:** no sleep, the lid ignored, GNOME's sleep settings set to never.
+7. **Balanced power profile:** tuned without GNOME, power-profiles-daemon with it.
+8. **Docker:**
+   - from Docker's repo, with Compose and buildx; your user in the docker group; logs at 10 MB × 3;
+   - **Portainer CE** as a container on port 9443 that starts with the machine;
+   - **NVIDIA Container Toolkit** on machines with an NVIDIA card.
+   - Not installed: lazydocker and What's Up Docker. Watchtower was archived on 2025-12-17.
+9. **Cockpit,** with the packages it brings along (NetworkManager, PackageKit, udisks2).
+10. **Command-line and developer tools:**
+    - gh (GitHub's repo) plus the everyday CLI tools;
+    - basic build tools: build-essential (gcc, make), cmake, ninja, pkgconf, autoconf, automake, libtool, gdb.
+11. **Node.js:** your script, `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash`, as your user, then Node 26. Not apt.
+12. **Python:**
+    - dev packages and uv;
+    - a venv at `~/.venvs/automation` with the scraping and automation libraries;
+    - Playwright Chromium, ruff, pre-commit and httpie.
+13. **Go:** latest from go.dev, plus gopls, dlv, staticcheck and govulncheck.
+14. **Codecs and video acceleration:** every non-free codec and VA-API driver for maximum performance, open source or not.
+15. **Flathub.**
+16. **Google Chrome,** from Google's repo.
+17. **NVIDIA driver** (only with an NVIDIA card):
+    - picked automatically, with no question: Turing and newer (your RTX 2070 Super) gets NVIDIA's repo; Maxwell to Ada (your GTX 970) gets Debian's 550; older cards stay on nouveau;
+    - with Secure Boot, MOK enrollment is queued and its password is shown once;
+    - *verify* that the installed set includes what the Container Toolkit needs.
 
-**Drop:**
-- mirror benchmarking (use deb.debian.org, Debian's CDN);
-- the battery ladder, software fallback and helper services;
-- the thermal check and thinkfan;
+**Battery limit: not a checkbox.** You set it once in each laptop's BIOS. The ThinkPad E14 Gen 5 AMD has the option. On the HP Envy x360 13-ay0xxx, Linux exposes no charge control, and HP's forums suggest its consumer BIOS may not have the option. Check F10 setup; if it isn't there, that laptop goes without.
+
+**Dropped:**
+- mirror benchmarking (deb.debian.org);
+- the battery helpers;
+- thermal and thinkfan;
 - the backports kernel step;
-- DVD playback (libdvd-pkg);
-- fwupd firmware updates (you earlier wanted these every run);
-- every sub-option and free-text field.
-
-**Drop (machinery):**
+- DVD playback;
+- fwupd;
+- every sub-option;
 - saved choices and `/etc/kiln`;
 - "unchanged" detection;
 - the plan preview and review screen;
-- revert snapshots and the revert prompt;
+- revert snapshots;
 - subcommands;
-- the systemd scope, apt-daily masking and the sleep inhibitor;
-- the allow-apply file. In its place: refuse unless the system is Debian 13 amd64 and kiln runs as root, then a confirm before starting.
+- the systemd scope, apt-daily masking and the inhibitor;
+- the allow-apply file.
 
-**Kept from the old safety rules:** apt runs non-interactive and waits for the dpkg lock, because unattended-upgrades often runs on first boot. Large downloads go to `/var/tmp`.
+**Kept from the old rules:** apt runs non-interactive and waits for the dpkg lock; large downloads go to `/var/tmp`.
+
+This entry overrides D50's "no firewall" (UFW is now in) and D12 (kiln no longer owns the battery limit).
 
 ## Proposals from the second verification pass
 
@@ -525,4 +555,4 @@ You accepted all of these on 2026-11-07 as written (the "current text" option), 
 
 1. **Closed (D50):** Wi-Fi power saving on always-on machines stays at Debian's default. (The test box showed 19–572 ms latency and 6.7% loss with power saving on, 3–7 ms and none with it off; the proposed NM `wifi.powersave = 2` option was not adopted.)
 
-Open: the rewrite's scope (D55, proposed).
+Next: write the rewrite to D55.
