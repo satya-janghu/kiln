@@ -236,6 +236,11 @@ All are in **main** unless noted. Source: `https://packages.debian.org/trixie/<p
 | `dkms status` prints `<module>/<version>, <kernel>, <arch>: installed` (or `built`, plus extra notes) per module and kernel. Debian's 550 module is `nvidia-current`, NVIDIA's open one `nvidia`. With no key configured, dkms signs with `/var/lib/dkms/mok.key` / `mok.pub`, creating them only if missing. | V | dkms 3.2.2-1~deb13u1 `dkms.in` (`do_status`, `module_status_built`, `prepare_mok`) |
 | `mokutil --generate-hash` prompts `input password: ` and `input password again: `, each followed by a newline, then prints the crypt hash (`$…`) on its own line. | V | mokutil 0.7.2-1 src/mokutil.c `get_password`, `generate_hash` |
 
+## 17b. Firmware updates (fwupd)
+
+- fwupd 2.0.20: exit 2 = nothing to do, 101 = no network; `-y`, `--no-reboot-check`, `--no-device-prompt`; LVFS enabled by default; capsule updates need ESRT and the ESP, and `fwupd-amd64-signed` under Secure Boot (fwupd 2.0.20-1~deb13u1 source). [V]
+- **Field-checked on the test box (2026-11-08):** `fwupdmgr get-updates --json` exits 0 even when nothing is available (it prints `"Devices" : []`), while plain `get-updates` exits 2. `check-reboot-needed` exits 0 even with nothing staged, so kiln doesn't use it; it asks for a reboot only when `fwupdmgr update` applied something. [R]
+
 ## 18. Battery limit (70–80%)
 
 | Fact | Status | Source |
@@ -280,7 +285,6 @@ Facts that served features the rewrite drops (D55). Verified status and source k
 - **Backports kernel:** trixie 6.12.x vs backports 7.2.x via `linux-signed-amd64`, backports image needs `linux-base ≥ 4.17~`, no `linux-image-6.12-amd64` metapackage, unattended-upgrades installs new image names only as upgrade deps (madison; u-u 2.12). [V]
 - **Kernel comparison:** `dpkg --compare-versions A gt B` orders kernel release strings correctly (dpkg(1); HP box). [V]
 - **DVD:** `libdvd-pkg` (contrib) 1.4.3 templates `build`, `post-invoke_hook-install`, `first-install`; `dpkg-reconfigure -f noninteractive` builds `libdvdcss.so.2`. [V]
-- **fwupd** 2.0.20: exit 2 nothing to do, 101 no network; `-y`, `--no-reboot-check`, `--no-device-prompt`, `--json`, `check-reboot-needed`; LVFS on; capsule needs ESRT, ESP, `fwupd-amd64-signed` under Secure Boot (fwupd 2.0.20-1~deb13u1 source). [V]
 - **Thermal/thinkfan:** `/sys/class/platform-profile/` needs kernel ≥ 6.14 (ABI doc); thinkfan 1.3.1 has no config-test flag, reads `/etc/thinkfan.yaml` then `.conf`, unit ships disabled; `sensors-detect --auto` writes only `/etc/modprobe.d/lm_sensors.conf`; Envy x360 13 hp-wmi platform_profile probe [R]; packages `thinkfan`, `lm-sensors`. [V]
 - **Battery ladder (beyond kernel thresholds / D56):** TLP vendor matrix (linrunner.de; HP not listed); systemd.device(5) `SYSTEMD_WANTS` acts only on first activation, not change events; whether UPower re-reads hwdb `CHARGE_LIMIT` on a change event [U, dropped with D12]. [V]
 - **Process model (D41):** `systemctl mask --runtime` writes `/run/systemd/system/`, doesn't stop a running unit; `packagekit.service` D-Bus activated, GNOME Software 48.3 refresh/download behaviour, PackageKit apt backend gives up on the dpkg lock after 10 s; `systemd-run --scope` as root → `system.slice`, `default-kill-user-processes=false`; `setsid(2)` new session has no controlling terminal; `systemd-inhibit --what=sleep:idle:handle-lid-switch` and block-shutdown inhibitor semantics (systemd 257.13). [V]

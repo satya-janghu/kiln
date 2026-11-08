@@ -17,7 +17,7 @@ kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56**
   - Docker (+ Portainer, + NVIDIA Container Toolkit), Cockpit;
   - CLI and build tools, Node (your nvm script), Python, Go;
   - codecs and VA-API (all non-free), Flathub, Chrome;
-  - NVIDIA (automatic), and the battery limit at 70–80% (D56).
+  - NVIDIA (automatic), firmware updates with fwupd (D59), and the battery limit at 70–80% (D56).
 
 **Kept facts and choices from older entries**
 - Password SSH for the user and root from everywhere (D45). Every package auto-updates every 12 h, no automatic reboot (D40). gh from GitHub's repo (D18). uv via pipx (D11).
@@ -26,7 +26,7 @@ kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56**
 - Non-free always (D52). The stock kernel, never pinned (D38).
 
 **Dropped** (D55)
-- Mirror benchmarking, thermal and thinkfan, the backports kernel step, DVD playback, fwupd, every sub-option.
+- Mirror benchmarking, thermal and thinkfan, the backports kernel step, DVD playback, every sub-option. (fwupd came back in D59.)
 - Saved state, re-run detection, the plan preview, revert snapshots, subcommands, the process-model machinery (D41), backups (D36), the allow-apply file.
 
 ## How to read this log
@@ -556,6 +556,10 @@ This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for t
 ### D58 · 2026-11-08 · One-liner on a TinyURL, install.sh attached to releases
 
 **Status: decided** (your instruction: "host it on an easy-to-type URL ... tiny URL"). `wget -qO- https://tinyurl.com/kilnsetup | bash`. The TinyURL points at `https://github.com/satya-janghu/kiln/releases/latest/download/install.sh`; GoReleaser attaches install.sh to each release, so GitHub Pages and `site/` are gone. The repo is public on GitHub so a fresh machine can download without logging in.
+
+### D59 · 2026-11-08 · fwupd firmware updates are back
+
+**Status: decided** (your instruction: "Add fwupd back"). This reverses D55's drop. There's one checkbox, "Firmware updates (fwupd)", ticked like the rest, shown on every machine. It installs fwupd and applies available BIOS and device updates once. It never reboots; when it applied something, it asks for a reboot. Catalog item 17b.
 
 ## Proposals from the second verification pass
 

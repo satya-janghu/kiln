@@ -92,6 +92,8 @@ func List() []Step {
 			Desc: "Chrome from Google's repository"},
 		{ID: "nvidia", Title: "NVIDIA driver", Needs: base, Show: hasNVIDIA, Do: doNVIDIA,
 			Desc: "The right driver for this card, picked automatically"},
+		{ID: "fwupd", Title: "Firmware updates (fwupd)", Needs: base, Do: doFwupd,
+			Desc: "BIOS and device firmware updates from LVFS, applied once"},
 		{ID: "battery", Title: "Battery limit (70-80%)", Needs: base, Show: hasBattery, Do: doBattery,
 			Desc: "Keeps the battery between 70% and 80% to make it last"},
 	}

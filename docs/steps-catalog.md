@@ -313,6 +313,14 @@ Steps:
 
 A reboot is needed. **Check:** `dkms status` shows the module built for the installed kernel; for NVIDIA's repository, `apt-cache policy nvidia-driver` shows the installed version from `developer.download.nvidia.com`; with Secure Boot, `mokutil --test-key` says enrolled or pending.
 
+### 17b. Firmware updates (fwupd)
+
+Shown: always (D59). Applied once during setup; kiln never reboots for it.
+1. Install `fwupd fwupd-amd64-signed udisks2` (the signed EFI binary is needed for BIOS capsule updates under Secure Boot).
+2. `fwupdmgr refresh --force`. Exit 101 (offline): a note to run `fwupdmgr refresh && fwupdmgr update` later; the step still counts as done.
+3. `fwupdmgr get-updates` (not `--json`, which exits 0 even with nothing to do). Exit 2: note "no updates available", done.
+4. `fwupdmgr update -y --no-reboot-check --no-device-prompt`. Exit 0: note, plus the reboot reason "firmware updates were applied" (BIOS updates finish at the next reboot). Any other failure (on battery, a device refusing) is a note, not a failed step.
+
 ### 18. Battery limit (70–80%)
 
 Shown: on any machine with a system battery (`type=Battery`, `scope` not `Device`). The goal is to keep the battery between 70% and 80% (D56, all approved 2026-11-08). The first method that fits is used.
@@ -345,4 +353,4 @@ The run's last screen. kiln never reboots on its own.
 
 ## Dropped (D55)
 
-Gone: mirror benchmarking (deb.debian.org directly), thermal and thinkfan, the backports kernel, DVD playback, fwupd, hostname and timezone settings, chrony, the battery threshold ladder, vendor battery modes and the software watcher, every sub-option, saved choices and `/etc/kiln` / `/var/lib/kiln`, "unchanged" detection, the plan preview and review screen, revert snapshots, file backups, subcommands and units that call kiln, the separate summary file, the systemd scope, apt-daily and PackageKit masking, the inhibitor, the single-instance lock, and the allow-apply file. Network migration (D52) and remote desktop (D50) stay gone; the firewall is back as UFW.
+Gone: mirror benchmarking (deb.debian.org directly), thermal and thinkfan, the backports kernel, DVD playback, hostname and timezone settings, chrony, the battery threshold ladder, vendor battery modes and the software watcher, every sub-option, saved choices and `/etc/kiln` / `/var/lib/kiln`, "unchanged" detection, the plan preview and review screen, revert snapshots, file backups, subcommands and units that call kiln, the separate summary file, the systemd scope, apt-daily and PackageKit masking, the inhibitor, the single-instance lock, and the allow-apply file. Network migration (D52) and remote desktop (D50) stay gone; the firewall is back as UFW.

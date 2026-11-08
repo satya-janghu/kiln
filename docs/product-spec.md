@@ -54,7 +54,7 @@ Nothing else. No saved choices, no `/etc/kiln`, no kiln binary in `PATH`.
 - Installing or switching desktops, Debian blends.
 - Profiles, headless or unattended runs, use over SSH.
 - Saved choices, re-run detection, "unchanged" reporting, a plan preview, revert snapshots, backups, subcommands.
-- Mirror benchmarking (kiln uses `deb.debian.org`), fwupd, thermal and thinkfan, the backports kernel, DVD playback.
+- Mirror benchmarking (kiln uses `deb.debian.org`), thermal and thinkfan, the backports kernel, DVD playback.
 - VMs, containers, other architectures, other distros.
 - Remote-access services (Tailscale, tunnels), router port forwarding.
 - Automated tests ([review-process.md](review-process.md)).
