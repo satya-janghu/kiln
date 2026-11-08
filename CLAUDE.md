@@ -51,7 +51,8 @@ Development happens on **macOS (Apple Silicon)**. The binary only ever runs on D
 
 - **Language:** Go 1.27, static binary (`CGO_ENABLED=0`).
 - **TUI:** Charm v2 (`charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`). Bubble Tea v2 is declarative: `View()` returns `tea.View` and keys arrive as `tea.KeyPressMsg`. Most examples online are v1, so follow `UPGRADE_GUIDE_V2.md` in the bubbletea repo.
-- **Release:** GoReleaser v2 to GitHub Releases, with `install.sh` attached; the one-liner `wget -qO- https://tinyurl.com/kilnsetup | bash` points at it (D58).
+- **Release:** GoReleaser v2 to GitHub Releases, with `install.sh` attached; the one-liner points at it (D58, D60).
+- **The one-liner is always curl** (owner's rule, D60): `apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash`. Every doc, message and script uses exactly this form; never switch it to wget.
 - Pinned versions are in `docs/decisions.md` D1.
 
 ## Commands

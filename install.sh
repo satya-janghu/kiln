@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh: download kiln, check it, and run it once (docs/distribution.md).
 #
-#   wget -qO- https://tinyurl.com/kilnsetup | bash
+#   apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash
 #
 # Everything runs from main(), called on the last line, so a truncated
 # download runs nothing. kiln runs from a temporary directory that is removed
@@ -13,7 +13,6 @@ SUMS="checksums.txt"
 
 # Global so the EXIT trap can see it.
 tmp=""
-downloader=""
 
 die() {
 	printf 'kiln: %s\n' "$*" >&2
@@ -26,28 +25,18 @@ cleanup() {
 	fi
 }
 
-# fetch URL DEST: download with wget or curl, with a plain-language error.
+# fetch URL DEST: download with curl, with a plain-language error. Short
+# connect timeouts with retries: if one of GitHub's servers is unreachable,
+# curl moves on to the next instead of waiting minutes.
 fetch() {
 	local url="$1" dest="$2" rc=0
-	if [ "$downloader" = wget ]; then
-		# Short connect timeouts with retries: if one of GitHub's servers is
-		# unreachable, move on to the next instead of waiting minutes.
-		wget -q --timeout=10 --tries=5 -O "$dest" "$url" </dev/null || rc=$?
-		case "$rc" in
-		0) return 0 ;;
-		5) die "the secure (HTTPS) connection to GitHub could not be verified. Run: apt install ca-certificates, then try again." ;;
-		8) die "GitHub has no file at $url. Check https://github.com/satya-janghu/kiln/releases." ;;
-		*) die "downloading $url failed (wget exit code $rc). Check the network connection and try again." ;;
-		esac
-	else
-		curl -fsSL --proto '=https' --connect-timeout 10 --retry 5 --retry-all-errors -o "$dest" "$url" </dev/null || rc=$?
-		case "$rc" in
-		0) return 0 ;;
-		60 | 77) die "the secure (HTTPS) connection to GitHub could not be verified. Run: apt install ca-certificates, then try again." ;;
-		22) die "GitHub has no file at $url. Check https://github.com/satya-janghu/kiln/releases." ;;
-		*) die "downloading $url failed (curl exit code $rc). Check the network connection and try again." ;;
-		esac
-	fi
+	curl -fsSL --proto '=https' --connect-timeout 10 --retry 5 --retry-all-errors -o "$dest" "$url" </dev/null || rc=$?
+	case "$rc" in
+	0) return 0 ;;
+	60 | 77) die "the secure (HTTPS) connection to GitHub could not be verified. Run: apt install ca-certificates, then try again." ;;
+	22) die "GitHub has no file at $url. Check https://github.com/satya-janghu/kiln/releases." ;;
+	*) die "downloading $url failed (curl exit code $rc). Check the network connection and try again." ;;
+	esac
 }
 
 main() {
@@ -56,9 +45,9 @@ main() {
 	if [ "$(id -u)" -ne 0 ]; then
 		cat >&2 <<'EOF'
 kiln must run as root. Log in as root (or run `su -`), then run:
-  wget -qO- https://tinyurl.com/kilnsetup | bash
+  apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash
 If sudo already works, you can instead run:
-  wget -qO- https://tinyurl.com/kilnsetup | sudo bash
+  sudo apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | sudo bash
 EOF
 		exit 1
 	fi
@@ -75,13 +64,7 @@ EOF
 	arch=$(dpkg --print-architecture 2>/dev/null || true)
 	[ "$arch" = amd64 ] || die "kiln runs only on amd64 (64-bit PC) machines. This one is ${arch:-unknown}."
 
-	if command -v wget >/dev/null 2>&1; then
-		downloader=wget
-	elif command -v curl >/dev/null 2>&1; then
-		downloader=curl
-	else
-		die "neither wget nor curl is installed. Run: apt install wget, then try again."
-	fi
+	command -v curl >/dev/null 2>&1 || die "curl isn't installed. Run: apt install -y curl, then try again."
 
 	tmp=$(mktemp -d /var/tmp/kiln.XXXXXX) || die "could not create a temporary directory in /var/tmp."
 	trap cleanup EXIT

@@ -7,7 +7,7 @@ kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56**
 **What kiln is**
 - A one-time setup tool for a fresh Debian 13 amd64 install, run at the console as root (D54).
 - No questions beyond one checklist; every value is fixed (D55). Nothing is saved, and nothing of kiln keeps running. The one exception is the battery script and timer on laptops that need it (D56).
-- Go, one static binary, run with the one-liner `wget -qO- https://tinyurl.com/kilnsetup | bash` (D1, D14, D15, D58). Three screens: checklist, progress, summary (D55), in the Okabe Night palette (D57).
+- Go, one static binary, run with the one-liner `apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash` (D1, D14, D15, D58, D60). Three screens: checklist, progress, summary (D55), in the Okabe Night palette (D57).
 - The Debian installer decides GNOME or no desktop (D22, D29). kiln shows the **same checklist on every install**; only hardware hides an item (NVIDIA, battery) (D55).
 
 **What it does** (D55 has the list)
@@ -555,11 +555,24 @@ This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for t
 
 ### D58 · 2026-11-08 · One-liner on a TinyURL, install.sh attached to releases
 
-**Status: decided** (your instruction: "host it on an easy-to-type URL ... tiny URL"). `wget -qO- https://tinyurl.com/kilnsetup | bash`. The TinyURL points at `https://github.com/satya-janghu/kiln/releases/latest/download/install.sh`; GoReleaser attaches install.sh to each release, so GitHub Pages and `site/` are gone. The repo is public on GitHub so a fresh machine can download without logging in.
+**Status: decided** (your instruction: "host it on an easy-to-type URL ... tiny URL"). The TinyURL points at `https://github.com/satya-janghu/kiln/releases/latest/download/install.sh`; GoReleaser attaches install.sh to each release, so GitHub Pages and `site/` are gone. The repo is public on GitHub so a fresh machine can download without logging in.
 
 ### D59 · 2026-11-08 · fwupd firmware updates are back
 
 **Status: decided** (your instruction: "Add fwupd back"). This reverses D55's drop. There's one checkbox, "Firmware updates (fwupd)", ticked like the rest, shown on every machine. It installs fwupd and applies available BIOS and device updates once. It never reboots; when it applied something, it asks for a reboot. Catalog item 17b.
+
+### D60 · 2026-11-08 · The one-liner is always curl
+
+**Status: decided** (your instruction: "make this a curl command … ensure this remains a curl command always").
+
+```bash
+apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | bash
+```
+
+- **`apt install -y curl &&` (forced):** curl is Priority `optional` in trixie, so a fresh install doesn't have it (wget is `standard`); without this the command fails with "curl: command not found". Installing an installed package is a no-op.
+- **`--connect-timeout 10` (forced):** your network can't reach one of GitHub's download servers (`185.199.109.133`). Plain curl waits about 135 s on it; with a 10 s connect timeout it moves to the next server after about 5 s (measured on the test box).
+- install.sh uses curl only (with `--connect-timeout 10 --retry 5 --retry-all-errors`); its wget path is gone.
+- With sudo: `sudo apt install -y curl && curl -fsSL --connect-timeout 10 https://tinyurl.com/kilnsetup | sudo bash`.
 
 ## Proposals from the second verification pass
 
