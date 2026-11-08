@@ -1,24 +1,20 @@
 ---
-description: Review one step against the catalog, current docs and the engineering rules (report only, no edits)
+description: Review one step against the catalog, current docs and the rules (report only, no edits)
 argument-hint: <step-id>
 ---
 
-Review the implementation of step `$ARGUMENTS` in `internal/steps/$ARGUMENTS/`. **Don't edit any files. Report only.** There are no tests, so this review is the main quality gate: be thorough and adversarial.
+Review the implementation of catalog item `$ARGUMENTS`. **Don't edit any files. Report only.** There are no tests, so this review is the main quality gate: be thorough and adversarial.
 
-Compare the code against the step's entry in `docs/steps-catalog.md`, the rules in `CLAUDE.md`, `docs/architecture.md` and `docs/review-process.md`. Cover each of these explicitly:
+Compare the code with the item in `docs/steps-catalog.md`, the rules in `CLAUDE.md` and D54–D56 in `docs/decisions.md`. Cover each of these:
 
-- **Catalog conformance:** purpose, applicability, options, actions, Check logic and gotchas. List every divergence, in either direction.
-- **Facts:** every package name, path, key, flag and default the code uses must appear in `docs/debian13-notes.md` as **V** (checked less than 30 days ago) or be handled as **R**. Re-open the primary source for anything that looks off and quote the relevant line. Flag any **U** fact the code depends on as a blocker.
-- **Check is read-only:** list every call it makes.
-- **Idempotency:** walk through a second run on an already-configured machine. Does every path report `unchanged`?
-- **Failure paths:** for each action that can fail, what state is the machine left in, and what does the summary tell the owner? Are dependent steps skipped?
-- **Revert** (risky steps): does the revert restore the exact previous files and service state? What happens if kiln dies between "apply" and "check" (the `pending` record)?
-- **Applicability matrix:** GNOME or none, SSH server or none, laptop or desktop, AMD, Intel or NVIDIA, Secure Boot on or off, backports on or off.
-- **Shared path:** all changes go through `action`s and `sys.System`. No direct `os.WriteFile`, no direct `exec.Command`, no `bash -c` with interpolation. Piped installers use only a pinned `sys.Fetch` download, run with `bash <file>` as the user.
-- **Files:** every write goes through `sys.System.WriteFile (managed write)`.
-- **apt:** non-interactive environment, confold/confdef, preseeded debconf, lock wait.
-- **Secrets:** never in argv, logs, the summary or `state.json`.
-- **Unapproved decisions:** the code must implement nothing marked "(proposed: Pn)" or relying on a **Status: proposed** decision. Any behavior the catalog doesn't specify counts as a finding, not as something to accept.
-- **Code quality:** error wrapping, context cancellation, resource cleanup, races, shadowed errors, unchecked errors, dead code. Is `make lint` clean?
+- **Catalog conformance:** what it installs, writes and runs, when it's shown, and how it confirms it worked. List every divergence, in either direction.
+- **Facts:** every package name, path, key, flag and default must be **V** in `docs/debian13-notes.md`. Re-open the primary source for anything that looks off. A **U** fact the code depends on is a blocker.
+- **Fresh install, run once:** does it work on a fresh Debian 13 server install and on a GNOME install? Does a second run finish without errors or damage? Don't ask for re-run machinery.
+- **Failure paths:** for each command that can fail, what state is the machine left in, and does the summary tell the owner what to do? Are the steps that need it skipped?
+- **Hardware:** AMD or Intel, NVIDIA (Turing+, Maxwell–Ada, older), laptop or desktop, Secure Boot on or off.
+- **Rules:** no `bash -c` with interpolation; apt non-interactive with confold and lock waiting; atomic file writes; downloads to `/var/tmp`; user commands via `runuser` with a clean environment; secrets never in argv or the log.
+- **Simplicity (D54):** flag anything that saves state, runs after kiln exits (except D56's battery timer), adds an option or question, or handles edge cases a fresh install never has.
+- **Unapproved decisions:** nothing relying on **Status: proposed**. Behaviour the catalog doesn't specify is a finding.
+- **Code quality:** error wrapping, context cancellation and timeouts, resource cleanup, unchecked errors, dead code; `make lint` clean.
 
-Output findings sorted by severity (blocker / should-fix / nit), each with `file:line`, the evidence (quote the doc or code), and a one-line fix. End with a verdict: `reviewed` (no blockers or should-fix findings) or `changes needed`.
+Output findings sorted by severity (blocker / should-fix / nit), each with `file:line`, the evidence and a one-line fix. End with a verdict: `reviewed` or `changes needed`.

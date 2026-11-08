@@ -2,42 +2,45 @@
 
 ## The one-liner
 
-You type this at the console of a freshly installed machine, so it's kept short. `install.sh` is served from GitHub Pages.
+Typed at the console of a freshly installed machine, so it's short (D31). `install.sh` is served from GitHub Pages.
 
-With sudo already working:
-
-```bash
-wget -qO- https://satya-janghu.github.io/kiln/i | sudo bash
-```
-
-As root (if you set a root password during install there is no sudo yet; log in as root or use `su -`, not plain `su`):
+As root (log in as root or use `su -`, not plain `su`):
 
 ```bash
 wget -qO- https://satya-janghu.github.io/kiln/i | bash
 ```
 
-Type the `https://` part. Without it, wget's first request goes over plain HTTP before GitHub redirects, and that response could be tampered with on the network. `curl -fsSL https://satya-janghu.github.io/kiln/i | sudo bash` works too. Minimal installs usually have wget but not curl.
+With sudo working:
 
-After the first run, the binary is already installed, so later runs are just `sudo kiln`.
+```bash
+wget -qO- https://satya-janghu.github.io/kiln/i | sudo bash
+```
 
-## install.sh (small, auditable, shellcheck-clean)
+Type the `https://`. Without it, wget's first request is plain HTTP before GitHub redirects, and that response could be tampered with. `curl -fsSL https://satya-janghu.github.io/kiln/i | bash` works too, but minimal installs usually have wget and not curl.
 
-1. The whole body sits inside `main() { ... }; main "$@"`, so a truncated download runs nothing.
-2. It uses `set -euo pipefail`. It requires root (`id -u` = 0). Otherwise it prints both one-liners and exits.
-3. It checks `/etc/os-release` for `ID=debian` and `VERSION_ID="13"`, and checks that `dpkg --print-architecture` is `amd64`.
-4. It picks a downloader: `wget` if present, else `curl`, else it fails with "Install wget first: apt install wget". wget and `ca-certificates` are both Priority standard, so they're absent if the installer's "standard system utilities" task was unticked. If HTTPS verification fails, the message says to run `apt install ca-certificates`.
-5. It downloads `https://github.com/satya-janghu/kiln/releases/latest/download/kiln_linux_amd64.tar.gz` and `.../checksums.txt` into `tmp=$(mktemp -d /var/tmp/kiln.XXXXXX)` (removed by a `trap` on exit). Then it runs `cd "$tmp" && sha256sum --ignore-missing -c checksums.txt`. It must run inside that directory, because checksums.txt holds bare file names. If nothing matched, coreutils 9.7 prints "no file was verified" and exits non-zero, so a missing or renamed archive also stops the install.
-6. It installs to `/usr/local/bin/kiln` (0755) and creates `/etc/kiln/` (0755) and `/etc/kiln/allow-apply`.
-7. If `{ : </dev/tty; } 2>/dev/null` succeeds, it runs `exec /usr/local/bin/kiln "$@" </dev/tty`. The script itself arrived on stdin, so the wizard has to read the keyboard from the TTY instead. Don't test `[ -r /dev/tty ]`: the device node is mode 0666, so that test is true even when there is no controlling terminal; only actually opening it tells.
-8. If there's no TTY, it prints "kiln was installed. Run `sudo kiln` from a terminal." and exits 0.
+To run kiln again (for example after a failed item), type the one-liner again.
+
+## install.sh
+
+Small and shellcheck-clean.
+
+1. The whole body sits in `main() { ... }; main "$@"`, so a truncated download runs nothing.
+2. `set -euo pipefail`. It requires root; otherwise it prints both one-liners and exits.
+3. It checks `/etc/os-release` for `ID=debian` and `VERSION_ID="13"`, and that `dpkg --print-architecture` is `amd64`.
+4. It uses `wget` if present, else `curl`, else it says "Install wget first: apt install wget". If HTTPS verification fails, it says to run `apt install ca-certificates`.
+5. It downloads `https://github.com/satya-janghu/kiln/releases/latest/download/kiln_linux_amd64.tar.gz` and `.../checksums.txt` into `tmp=$(mktemp -d /var/tmp/kiln.XXXXXX)`, removed by a `trap` on exit. It runs `cd "$tmp" && sha256sum --ignore-missing -c checksums.txt` inside that directory, because checksums.txt holds bare file names. If nothing matched, coreutils prints "no file was verified" and exits non-zero, so a missing archive stops the install.
+6. If `{ : </dev/tty; } 2>/dev/null` succeeds, it runs `"$tmp/kiln" "$@" </dev/tty`. The script arrived on stdin, so kiln must read the keyboard from the TTY. Don't test `[ -r /dev/tty ]`: the node is mode 0666, so that is true even with no controlling terminal. It runs kiln as a child, not with `exec`, so the `trap` still removes the directory afterwards.
+7. With no TTY, it says "Run this from the machine's console." and exits non-zero.
+
+kiln is never installed to `/usr/local/bin`, and no `/etc/kiln` or allow-apply file is created (D55). After the run, the only trace of kiln is `/var/log/kiln.log` (plus the battery script and timer on laptops that need them, D56).
 
 ## Releases (GoReleaser v2)
 
 - `.goreleaser.yaml` with `version: 2`.
 - One build: `linux/amd64`, `CGO_ENABLED=0`, `-trimpath`, `-ldflags "-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}"`.
-- The archive name is fixed as `kiln_linux_amd64.tar.gz`, with no version in it, so `releases/latest/download/` URLs keep working.
-- The checksum file is named `checksums.txt` via `checksum.name_template`. GoReleaser's default name includes the version.
-- A GitHub Actions workflow runs on `v*` tags: `make lint`, `make vuln`, then `goreleaser release --clean`. After that it deploys GitHub Pages from `site/`, where the workflow copies `install.sh` to `site/i` and `site/install.sh`.
-- Pages are deployed with the Actions source (`actions/upload-pages-artifact` + `actions/deploy-pages`), not "deploy from /docs". The repo's `docs/` folder is design documentation, not a website.
-- Check the config locally with `make release-check` (`goreleaser check`).
-- A tag is only cut after review sign-off (see [review-process.md](review-process.md)).
+- The archive is always `kiln_linux_amd64.tar.gz`, with no version, so `releases/latest/download/` URLs keep working.
+- The checksum file is `checksums.txt`, set with `checksum.name_template` (D14).
+- A GitHub Actions workflow on `v*` tags runs `make lint`, `make vuln`, then `goreleaser release --clean`. It then deploys GitHub Pages from `site/`, copying `install.sh` to `site/i` and `site/install.sh`.
+- Pages use the Actions source (`actions/upload-pages-artifact` + `actions/deploy-pages`). The repo's `docs/` folder is not a website.
+- `make release-check` runs `goreleaser check` locally.
+- A tag is cut only after sign-off ([review-process.md](review-process.md)).

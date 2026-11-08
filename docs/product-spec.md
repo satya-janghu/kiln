@@ -1,94 +1,66 @@
 # Product spec
 
-## One sentence
+## What kiln is
 
-`kiln` turns a fresh Debian 13 "trixie" amd64 bare-metal install into a configured, always-on machine in one sitting at its console, the Debian way (apt, deb822 sources, Debian package names, Debian defaults). **It's a one-time tool:** you run it once per machine and never deal with it again (D54).
+kiln is a one-time setup tool for a fresh Debian 13 "trixie" amd64 install (D54). You run it once, at the machine's own console, as root, right after the Debian installer finishes. It installs the packages and writes the configuration you would otherwise type by hand on every machine, SSH included. Then you never deal with it again.
 
-## What it is, in the owner's terms (D54)
+It could have been a bash script. The TUI exists only so the same tool fits servers without a desktop and installs where you picked GNOME.
 
-- Its job is to install the packages and write the configuration (SSH included) that would otherwise be typed by hand on every homelab machine.
-- It could have been a bash script. The TUI and per-step modularity exist only so one tool fits both Debian servers without a desktop and Debian installs with GNOME.
-- It must not turn into an app that lives on the machine: nothing of kiln should keep running, need re-running, or be needed to manage the system afterwards.
-- Fewer questions and options are better. Prefer Debian's defaults.
-- "kiln" is only the app's name.
+The plan is [decisions.md](decisions.md) D55 (scope) and D56 (battery). Where this file and those entries disagree, the entries win.
 
-> **Pending (D54):** the code doesn't match this yet. It still installs battery and ThinkPad helpers that call the kiln binary, keeps state in `/etc/kiln` and `/var/lib/kiln`, and carries re-run machinery (saved choices, the revert prompt, subcommands). Whether to strip that (approach A) or rewrite smaller (approach B) is the owner's next decision. Sections below that describe re-runs reflect the current code, not the intent.
+## Who uses it
+
+One owner, several homelab machines. Each machine is set up once, by hand, at its console. Every machine is treated as always on, laptop or not.
 
 ## How it's used
 
-1. Install Debian 13 with the official installer. **The installer decides** whether there's a desktop (GNOME or none) and whether to use any Debian blend. kiln installs the SSH server itself if you didn't pick it (D45).
-2. Log in at the machine's own console, as your user with sudo or as root via `su -`.
-3. Type the one-liner (see [distribution.md](distribution.md)). It installs the `kiln` binary and starts the wizard.
-4. The wizard works like this:
-   - It shows what it detected.
-   - Every step starts checked; you untick what you don't want on this machine and adjust the options.
-   - You review the exact plan.
-   - It runs with live progress.
-   - It ends with a summary and offers a reboot.
-5. *(Current code; under review per D54.)* Later runs on the same machine start with that machine's previous choices ticked. Re-running only fixes what drifted. Everything else reports "unchanged". The intent is a single run; re-running is only for finishing a run that failed partway.
+1. Install Debian 13 with the official installer. The installer decides GNOME or no desktop (D22, D29). kiln doesn't change that.
+2. Log in at the console as root (or `su -`, or with `sudo`).
+3. Type the one-liner from [distribution.md](distribution.md).
+4. kiln shows one checklist. Everything is ticked. Untick what this machine doesn't need and press Enter.
+5. It runs each item in order, with live output.
+6. It ends with a summary: what was done, what failed and what to do about it, and whether to reboot.
 
-The owner is always physically present. kiln isn't designed to be run over SSH. If it detects an SSH session, it warns that the SSH step may disconnect you, but it doesn't refuse.
+The checklist is the same on every install, GNOME or server. Only hardware hides an item: the NVIDIA items need an NVIDIA card, and the battery limit needs a battery. There are no sub-options and no other questions. Every value is fixed.
 
-## Machines
+If a run fails halfway, run the one-liner again. That is safe.
 
-- There's one owner and several machines, and each machine is set up individually. There are **no saved profiles**.
-- Every machine is treated as an always-on server, laptop or not.
-- Known hardware, which the catalog targets first:
-  - Lenovo ThinkPad E14 Gen 5, AMD Ryzen 5 7530U, Radeon integrated graphics.
-  - HP Envy x360 13, AMD Ryzen 5 4500U, 8 GB RAM (older, low RAM).
-- Desktops may come later, so nothing may assume "laptop".
-- Bare metal only. If kiln detects a VM, it warns and continues. A container is refused.
+## What it does
 
-## Commands
+The full list, with exact behavior, is in [steps-catalog.md](steps-catalog.md) (D55 until the catalog is rewritten). In short:
 
-| Command | What it does | Changes the system? |
-|---|---|---|
-| `kiln` (alias `kiln wizard`) | The TUI. This is the only way to apply changes. | Yes, after you confirm the plan |
-| `kiln plan [--skip a,b]` | Prints the plan for this machine using defaults and last run's choices. Same code path as a real run. | No |
-| `kiln facts [--json]` | Prints what was detected (hardware and installer choices) | No |
-| `kiln battery status\|apply\|watch` | Battery charge-limit helper, also used by systemd units | `apply` and `watch` do |
-| `kiln thermal apply` | At boot on ThinkPads: validates the thinkfan config once fan control is active, then enables thinkfan | Yes |
-| `kiln mirrors bench [--apply]\|reset` | Benchmarks mirrors by throughput, or goes back to `deb.debian.org` | `--apply` and `reset` do |
-| `kiln secrets show [name]` | Root only. Prints a stored secret, such as the Secure Boot one-time password. | No |
+- **Always:** a safety check (Debian 13, amd64, root), wait for first-boot updates, deb822 sources with contrib, non-free, non-free-firmware, security, updates and backports, a full upgrade, firmware and CPU microcode.
+- **Checkboxes, all ticked:**
+  - passwordless sudo, system basics (zram, journal cap, inotify, time sync);
+  - SSH with password logins for the user and root (D45);
+  - UFW and fail2ban, automatic updates every 12 h with no automatic reboot;
+  - always on (no sleep, lid ignored), balanced power profile;
+  - Docker with Portainer (and the NVIDIA Container Toolkit with an NVIDIA card), Cockpit;
+  - CLI and build tools, Node (nvm), Python (uv and a venv), Go;
+  - codecs and VA-API, Flathub, Google Chrome;
+  - the NVIDIA driver, picked automatically;
+  - the battery held between 70% and 80% (D56).
 
-The wizard applies changes only on Linux, and only if `/etc/kiln/allow-apply` exists (`install.sh` creates it) or `--i-know-this-is-a-fresh-machine` is passed.
+## What it leaves behind
 
-## Defaults: everything on
+- Ordinary Debian configuration and packages. None of it needs kiln.
+- `/var/log/kiln.log`: every command, its exit code and its output. Secrets never go in it.
+- On laptops that need it, the battery script and its systemd timer (D56). They are plain files, not part of kiln. This is the only thing that keeps running.
 
-- Every kiln step and sub-option starts checked. That includes the NVIDIA driver, trixie-backports, zram, fail2ban, auto-updates, firmware updates, Flathub and the third-party repos.
-- **One exception:** the backports kernel starts **off**. Every machine runs Debian's stock trixie kernel (6.12 LTS, kept on the latest version by normal upgrades) unless you select the backports kernel for that machine (D38).
-- A step that doesn't fit this machine stays checked but shows `not applicable: <reason>` and is skipped. The reason can be hardware (no NVIDIA GPU, no battery) or an installer choice (no GNOME, no SSH server).
-- To turn things off quickly, toggle a single item, toggle a whole category, or filter by text.
-- "On by default" doesn't mean reckless. SSH changes are validated first, checked after applying, and reverted automatically if the check fails.
-
-## Secrets
-
-- The only secret today is the one-time password for enrolling kiln's Secure Boot key when NVIDIA modules need signing (D24). kiln generates it and shows it once on the summary screen.
-- There's no remote-desktop password any more: that step was removed (D50).
-- It's stored in `/etc/kiln/secrets/<name>` (directory 0700, file 0600, owned by root). `sudo kiln secrets show <name>` prints it again.
-- It's never written to logs, the summary file or `state.json`.
-
-## What a run leaves behind
-
-- `/var/log/kiln.log`: every command, its exit code and its output, with secrets redacted.
-- `/var/log/kiln-summary.txt`: for each step, whether it was done, unchanged, failed or skipped, and why. Also the collected notes, and whether a reboot is needed and why.
-- `/etc/kiln/state.json`: this machine's last choices, the battery method that worked, and any change still in progress.
+Nothing else. No saved choices, no `/etc/kiln`, no kiln binary in `PATH`.
 
 ## Out of scope
 
-- Installing or switching desktops. That's the installer's job, and only GNOME or none is supported.
-- Debian blends. (The SSH server is installed by kiln if missing; D45.)
-- Saved profiles, headless or unattended runs, and use over SSH.
-- Automated tests of any kind (see [review-process.md](review-process.md)).
-- Backups and snapshots.
-- Tailscale, Cloudflare Tunnel and other remote-access setups.
-- Debugger and ptrace tweaks.
-- VMs (libvirt, cockpit-machines), Podman, KDE, other distros, and other architectures.
-- Router port forwarding. kiln only notes it.
+- Installing or switching desktops, Debian blends.
+- Profiles, headless or unattended runs, use over SSH.
+- Saved choices, re-run detection, "unchanged" reporting, a plan preview, revert snapshots, backups, subcommands.
+- Mirror benchmarking (kiln uses `deb.debian.org`), fwupd, thermal and thinkfan, the backports kernel, DVD playback.
+- VMs, containers, other architectures, other distros.
+- Remote-access services (Tailscale, tunnels), router port forwarding.
+- Automated tests ([review-process.md](review-process.md)).
 
-## Success criteria
+## Done means
 
-1. One wizard session after the OS install leaves the machine configured.
-2. A second run changes nothing.
-3. A failed step never leaves the machine broken. The summary says what failed and what to do next.
-4. The owner and Claude both sign off on every catalog entry, following [review-process.md](review-process.md).
+1. One run after the installer leaves the machine configured.
+2. Running it again is safe and breaks nothing.
+3. A failed item never stops the run. The summary says what failed and what to do next.

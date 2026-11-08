@@ -1,46 +1,33 @@
 # Decisions log
 
-## Current state (2026-11-07)
+## Current state (2026-11-08)
 
-Where an older entry conflicts with D54, D54 wins.
+kiln is being **rewritten small** (D54, approach B). **D55** (scope) and **D56** (battery) are the plan, and they override any older entry that conflicts. Entries D1–D53 describe the old, over-engineered tool. Their verified facts carry over; their machinery does not.
 
-**Scope and direction**
-- kiln is a one-time setup tool for fresh Debian 13 installs; it should leave nothing running and ask few questions (D54).
-- **Approach B: a small rewrite (D54), scope decided in D55 (2026-11-08).** D55 overrides anything below that conflicts with it.
-- No profiles or headless mode; the wizard is the only way to apply (D27, D33).
-- Run at the console in person; risky changes are checked and reverted in-process (D28).
-- TUI: responsive, console-safe (D32), Windows XP text-mode Setup look (D42).
+**What kiln is**
+- A one-time setup tool for a fresh Debian 13 amd64 install, run at the console as root (D54).
+- No questions beyond one checklist; every value is fixed (D55). Nothing is saved, and nothing of kiln keeps running. The one exception is the battery script and timer on laptops that need it (D56).
+- Go, one static binary, installed with the one-liner (D1, D14, D15, D31). Three screens: checklist, progress, summary (D55), in the Windows XP Setup look (D42).
+- The Debian installer decides GNOME or no desktop (D22, D29). kiln shows the **same checklist on every install**; only hardware hides an item (NVIDIA, battery) (D55).
 
-**Installer and desktop**
-- The Debian installer owns the desktop and blends; kiln only detects them (D29). GNOME or no desktop, nothing else (D22).
+**What it does** (D55 has the list)
+- **Always:** safety check; wait for first-boot updates; deb822 sources with non-free and backports; full upgrade; firmware and microcode.
+- **Checkboxes, all ticked:**
+  - sudo, system basics (zram = RAM), SSH, UFW + fail2ban, automatic updates, always-on, balanced power;
+  - Docker (+ Portainer, + NVIDIA Container Toolkit), Cockpit;
+  - CLI and build tools, Node (your nvm script), Python, Go;
+  - codecs and VA-API (all non-free), Flathub, Chrome;
+  - NVIDIA (automatic), and the battery limit at 70–80% (D56).
 
-**Packages and updates**
-- Every package auto-updates every 12 hours, no automatic reboot (D40).
-- Non-free and non-free firmware always on (D52). `gh` from GitHub's apt repo (D18). uv via `pipx` (D11). Playwright deps through kiln's apt helper (D25). timesyncd (D7). zram-generator (D8).
+**Kept facts and choices from older entries**
+- Password SSH for the user and root from everywhere (D45). Every package auto-updates every 12 h, no automatic reboot (D40). gh from GitHub's repo (D18). uv via pipx (D11).
+- Balanced power: power-profiles-daemon with GNOME, tuned without (D5, D52). GNOME no-suspend keys locked (D23).
+- NVIDIA: NVIDIA's repo for Turing and newer, Debian's 550 for Maxwell to Ada (D39), now picked automatically. MOK enrollment with Secure Boot (D24).
+- Non-free always (D52). The stock kernel, never pinned (D38).
 
-**Kernel and NVIDIA**
-- Stock trixie kernel, latest, never pinned; backports kernel opt-in (D38).
-- NVIDIA source per machine: NVIDIA latest (Turing+) or Debian stock (D39). Secure Boot: MOK enrollment queued (D24).
-
-**SSH and sudo**
-- ssh step installs sshd; password logins for user and root from everywhere (D45), On/Off only (D51).
-- sudo works without re-login (D45). fail2ban bans via nftables (D9, D50).
-
-**Power**
-- Balanced everywhere: ppd `balanced` with GNOME, tuned `balanced` without (D52, D5). Thermal only checks the profile (D6, D52). GNOME no-suspend keys locked (D23). kiln owns the battery limit (D12).
-
-**Mirrors**
-- APT `mirror+file:` method (D10). Country from the timezone (D21). No neighbours; ranked by measured speed only (D52).
-
-**Removed**
-- Firewall, remote desktop, SSH key options, TLP; Wi-Fi power saving left default (D50).
-- Network migration (D52). Fallback kernel tracking (D38).
-
-**Process and quality**
-- Review to sign-off, no tests (D30); static analysis (D34); read-only field check (D46).
-- Plan and run share one path (D2). Backups under `/var/lib/kiln/backup/` (D36). Process model (D41).
-
-**D54 answers:** most were re-run edge cases and are moot under the rewrite (2026-11-08). What survives depends on the D55 scope.
+**Dropped** (D55)
+- Mirror benchmarking, thermal and thinkfan, the backports kernel step, DVD playback, fwupd, every sub-option.
+- Saved state, re-run detection, the plan preview, revert snapshots, subcommands, the process-model machinery (D41), backups (D36), the allow-apply file.
 
 ## How to read this log
 
@@ -503,7 +490,7 @@ Earlier the same day you also decided D50–D52 (no firewall, remote desktop, ne
     - with Secure Boot, MOK enrollment is queued and its password is shown once;
     - *verify* that the installed set includes what the Container Toolkit needs.
 
-**Battery limit: not a checkbox.** You set it once in each laptop's BIOS. The ThinkPad E14 Gen 5 AMD has the option. On the HP Envy x360 13-ay0xxx, Linux exposes no charge control, and HP's forums suggest its consumer BIOS may not have the option. Check F10 setup; if it isn't there, that laptop goes without.
+**Battery limit:** replaced by D56 (a checkbox again, holding the battery between 70% and 80%).
 
 **Dropped:**
 - mirror benchmarking (deb.debian.org);
@@ -523,7 +510,44 @@ Earlier the same day you also decided D50–D52 (no firewall, remote desktop, ne
 
 **Kept from the old rules:** apt runs non-interactive and waits for the dpkg lock; large downloads go to `/var/tmp`.
 
-This entry overrides D50's "no firewall" (UFW is now in) and D12 (kiln no longer owns the battery limit).
+This entry overrides D50's "no firewall" (UFW is now in). D56 replaces D12 for the battery.
+
+**Found while writing the docs (2026-11-08):**
+- **Forced:** Debian's 550 driver brings `libcuda1` and `nvidia-smi` only as Recommends. kiln installs it with Recommends, or containers can't use the GPU.
+- **Note:** NVIDIA's Container Toolkit doesn't list Debian 13 as supported (it says the Debian instructions should work). It gets tried on the RTX 2070 Super machine first.
+- **Proposed:**
+  1. **Swappiness 180.** zram is already used before disk because of swap priority (zram 100, disk swap negative). A high swappiness makes the kernel move idle memory into zram sooner, which frees RAM. The kernel docs allow 0–200 and only say "above 100" for zram.
+  2. **Portainer:** publish only 9443 and drop 8000, which only Edge agents use. Portainer stops if its admin account isn't created within 5 minutes of starting, so the summary says to open it within 5 minutes after a boot, or run `docker restart portainer` if the window passed.
+  3. **At start,** if a previous run died mid-install (`dpkg --audit` reports something), run `dpkg --configure -a` once, so running again stays safe. One command.
+  4. **Summary:** Enter reboots when a reboot is needed.
+  5. **The package layout** in architecture.md: `cmd/kiln`, `internal/detect`, `internal/run`, `internal/steps`, `internal/tui`, with no cobra.
+
+### D56 · 2026-11-08 · Battery held between 70% and 80%, including on the HP Envy
+
+**Status: decided** (your instruction, 2026-11-08), except the points marked **proposed**.
+
+**What you asked for:** an option to keep the battery between 70% and 80%, including on laptops like the HP Envy x360 13-ay0xxx (Ryzen 5 4500U) that have no BIOS option and no Linux charge-limit control.
+
+**What the HP turned out to have** (found over SSH on the test box, 2026-11-08):
+- No `charge_control_*` files. The only BIOS setting `hp-bioscfg` shows is `Sure_Start`.
+- Its firmware has an undocumented HP WMI command, "battery charge operation": command type `0x2B`, reached through `\_SB.WMID.WMAA`. The ACPI method is `SBCO` in SSDT6, and it writes the EC bits `WACL`, `SBIS`, `SBTC` and `BTNO`. It's reachable with the `acpi_call` module (Debian `acpi-call-dkms` 1.2.2-2.1; Secure Boot is off on this box).
+  - Mode `0x0000` is normal charging (verified).
+  - Mode `0x0200` is force discharge: the laptop runs on battery while plugged in (verified: 100% → 96%; going back to normal works at once).
+  - Mode `0x0100` is "no charge", expected to hold the charge while running on AC. **Not yet proven**: at 96% the battery's own hysteresis made it look the same as normal. A deeper test (discharge to 85%, then compare) is running.
+
+**Decided behaviour:**
+- One checkbox, "Battery limit (70–80%)", shown on any machine with a battery.
+- On the HP method: kiln installs `acpi-call-dkms` and writes a plain shell script plus a systemd timer. They are not part of kiln.
+  - Above 80%: switch charging off (hold).
+  - At 70% or below: switch it back on.
+  - On AC with charging off, the battery barely drains, so in practice it sits near 80% and only drops to 70% when unplugged.
+- This is the **one exception** to "nothing keeps running" (D54), at your request: a small script and timer that stay on the laptops that need it.
+
+**Proposed:**
+- **Check every 60 s rather than 300 s.** Reading the battery level costs nothing, and at 300 s a charging battery can overshoot 80% by a few percent before the next check. 60 s keeps it within about a percent.
+- **Laptops whose kernel offers `charge_control_end_threshold`** (e.g. ThinkPads): set end 80 / start 70 with one udev rule, with no script or timer, because the hardware enforces it itself. The ThinkPad E14 Gen 5 AMD can also use its BIOS option (D55).
+- **No method found:** the summary says to use the BIOS option if the laptop has one.
+- **If mode `0x0100` turns out not to hold:** fall back to force discharge from 80% down to 70%, then normal charging. That cycles the battery shallowly instead of holding it, so I'd bring it back to you first.
 
 ## Proposals from the second verification pass
 

@@ -1,104 +1,55 @@
 # Review process
 
-**There are no tests.** That means no unit tests, no container tests and no hardware test runs. kiln goes into production once the owner and Claude both agree that every part has been checked against current primary documentation and reasoned through for correctness. This file defines what "checked" means and tracks where each step stands.
+**There are no tests** (D30): no unit tests, no container tests, no test harnesses. Quality comes from review against primary sources and from runs on the owner's throwaway test box (D46).
 
-## What review relies on
+## Primary sources
 
-1. **Primary sources only.** Every Debian package name, suite, file path, config key, command and flag, default value, and sysfs attribute that the code relies on must be confirmed against a current primary source:
-   - packages.debian.org/trixie (and `trixie-backports`);
-   - manpages.debian.org/trixie;
-   - sources.debian.org (for Debian's shipped config and maintainer scripts);
-   - the trixie release notes;
-   - kernel.org documentation and the ABI;
-   - upstream docs (Docker, GNOME, Charm, Go).
+Every package name, path, config key, command flag and default the code relies on is checked against a current primary source:
 
-   Blogs, forums and memory don't count. Each fact is recorded in [debian13-notes.md](debian13-notes.md) with its URL and the date it was checked. Code may only rely on facts marked **V** there.
-2. **Static analysis** (review tooling, not tests). These must be clean:
-   - `make lint`: `go vet`, golangci-lint v2 with at least errcheck, staticcheck, gosec, govet, ineffassign, unused and errorlint, plus `shellcheck install.sh`;
-   - `make vuln`: govulncheck;
-   - `make release-check`.
-3. **Reasoned review per step** (`/review-step <id>`), against [steps-catalog.md](steps-catalog.md) and the rules in CLAUDE.md. The review must argue each of these explicitly:
-   - **Check is read-only.** List every call it makes.
-   - **Idempotency.** Walk through a second run and show it reports `unchanged`.
-   - **Failure paths.** For every action that can fail, say what state the machine is left in, and what the summary tells the owner.
-   - **Revert.** For risky steps, show that the revert restores the exact previous files and service state.
-   - **Not-applicable logic.** Cover every hardware and installer combination: GNOME or none, SSH server or none, laptop or desktop, AMD or Intel or NVIDIA.
-   - **No mutation outside `sys.System`,** and no `bash -c` with interpolation.
-   - **Secrets never reach** argv, logs or the summary.
-   - **Ordering and concurrency** (architecture: "Process model"):
-     - each action waits for its process to exit before the next one starts;
-     - "started" is never treated as "ready": checks poll until a deadline;
-     - nothing starts a background package job mid-run;
-     - shared state takes its lock;
-     - an interruption at every action leaves something the next run can repair.
-4. **Cross-cutting audit** (`/audit`): a full pass over all code and docs. It looks for drift between the catalog and the code, between the catalog and the notes, and between the options reference and the code. It also re-checks every **V** fact older than 30 days, plus concurrency issues, error handling, resource leaks, and TUI behavior at 80x24, at wide sizes, and on the Linux console.
-5. **Package list check** (`/check-packages`): every package any step can declare must exist in its stated suite and component. Check it against packages.debian.org, or the vendor repo's index for Docker and the GitHub CLI.
+- packages.debian.org/trixie (and trixie-backports);
+- manpages.debian.org/trixie;
+- sources.debian.org, for Debian's shipped config and maintainer scripts;
+- the trixie release notes;
+- kernel.org docs;
+- upstream docs (Docker, NVIDIA, GNOME, Go, Charm).
 
-## Field check (read-only, on a real machine)
+Blogs, forums and memory don't count. Each fact goes in [debian13-notes.md](debian13-notes.md) with its source and date:
 
-`scripts/field-check.sh` is the one sanctioned way to collect evidence from a real Debian machine without changing it (D46). Copy it next to a kiln binary and run it as root (`sudo bash field-check.sh`, or `su - -c …` where sudo isn't installed yet). It records:
-- kiln's read-only commands: `facts`, `plan`, `battery status`, and `mirrors bench` without `--apply`;
-- whether every declared package has a candidate in that machine's sources;
-- the command outputs behind any **U** row in debian13-notes.md (none are left; see the field observations);
-- Wi-Fi power saving and signal, plus suspend and lid events;
-- the battery, thermal and GPU sysfs attributes.
+- **V**: verified. Code may rely on it.
+- **U**: not verified. Code must not rely on it.
+- **R**: hardware behavior detected at run time, with both outcomes handled.
 
-Everything goes into `/tmp/kiln-field-<hostname>.txt`, which is the only file it writes. The results justify flipping U rows to V (with "observed on <machine>, <date>" as the source) and seeding fixes. They complement, but don't replace, the primary-source verification above.
+Facts from the old tool carry over. New ones (D55's *verify* items, D56's HP battery method) start as **U**.
 
-## Safety nets built into the product
+## Static analysis
 
-Reviews can't catch everything a real machine might do. These features stay in the design for that reason:
-- **The review screen** shows the exact plan before anything changes. It comes from the same code path as the real run.
-- **Backups:** copies of every file kiln changes, in `/var/lib/kiln/backup/`.
-- **Verify, then revert** for SSH changes, plus an interrupted-change prompt on the next start.
-- **A failed step never stops the run,** and the summary says what to do next.
-- **A full log** in `/var/log/kiln.log`.
+Review tooling, not tests. Must be clean before anything is tagged:
 
-## Sign-off
+- `make lint`: `go vet`, golangci-lint v2, `shellcheck install.sh`;
+- `make vuln`: govulncheck;
+- `make release-check`.
 
-kiln is ready for production when all of the following hold:
+## Per-step review
 
-- [ ] Every step below is `reviewed`, with the date and the commit it was reviewed at.
-- [ ] One full `/audit` pass on the release commit reports no findings, or only findings the owner accepted in writing in [decisions.md](decisions.md).
-- [ ] `make build lint vuln release-check` is clean on the release commit.
-- [ ] No **U** facts are left in [debian13-notes.md](debian13-notes.md) that any code path depends on.
-- [ ] Every **R** row in debian13-notes.md has its run-time detection, and the handling of both outcomes, checked in the step review.
-- [ ] The owner has read the catalog and agrees with it.
+Each step is read against its entry in [steps-catalog.md](steps-catalog.md) and the rules in CLAUDE.md and [architecture.md](architecture.md). The review argues:
 
-## Review status
+- every fact it uses is **V** (or **R** with both outcomes handled);
+- a second run does no harm;
+- each command that can fail leaves the machine usable, and the summary says what to do;
+- no `bash -c` with interpolation; secrets never reach argv or the log;
+- it fits both GNOME and no desktop, and hides correctly without the hardware.
 
-| Step | Status | Reviewed at (date / commit) | Notes |
-|---|---|---|---|
-| scaffold (CLI tree, Makefile, lint config, CI) | implemented | | |
-| engine (sys, apt, facts, options, state, runner, revert, app, cli) | implemented | | |
-| preflight | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| sudo | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| apt-sources | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| mirrors | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| upgrade | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
-| firmware-packages | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| kernel | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| network-migration | removed (D52) | | |
-| multimedia | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| repos | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
-| devtools | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| system | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
-| power | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| thermal | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| battery | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| firewall | removed (D50) | | |
-| ssh | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| fail2ban | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| docker | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| cockpit | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| remote-desktop | removed (D50) | | |
-| autoupdates | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
-| node | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| python | reviewed | 2026-11-07 / 6c390a0 | no open findings beyond nits; re-check after D54 |
-| go | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| firmware-updates | implemented | 2026-11-07 / 6c390a0 | reviewed; forced fixes in D53; re-review after D54 |
-| summary | implemented | | |
-| wizard (TUI) | implemented | | |
-| install.sh | implemented | | |
+## Test box
 
-Status values: `not started` → `implemented` → `reviewed` (no open findings) → `signed off` (by the owner).
+The owner's test box (D46, 10.10.10.150, HP Envy x360) may be reinstalled freely. The owner runs kiln there; it is never run from the Mac.
+
+## Checklist for the rewrite
+
+- [ ] Catalog rewritten to D55 and D56, and approved by the owner.
+- [ ] Every step reviewed against the catalog.
+- [ ] No **U** facts left that code depends on.
+- [ ] `make build lint vuln release-check` clean.
+- [ ] Fresh Debian 13 install on the test box, one full run, summary clean.
+- [ ] A second run on the same box: nothing breaks, nothing new fails.
+- [ ] A GNOME install and an NVIDIA machine, when available.
+- [ ] Owner sign-off.
