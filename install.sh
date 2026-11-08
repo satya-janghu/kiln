@@ -30,7 +30,9 @@ cleanup() {
 fetch() {
 	local url="$1" dest="$2" rc=0
 	if [ "$downloader" = wget ]; then
-		wget -q -O "$dest" "$url" </dev/null || rc=$?
+		# Short connect timeouts with retries: if one of GitHub's servers is
+		# unreachable, move on to the next instead of waiting minutes.
+		wget -q --timeout=10 --tries=5 -O "$dest" "$url" </dev/null || rc=$?
 		case "$rc" in
 		0) return 0 ;;
 		5) die "the secure (HTTPS) connection to GitHub could not be verified. Run: apt install ca-certificates, then try again." ;;
@@ -38,7 +40,7 @@ fetch() {
 		*) die "downloading $url failed (wget exit code $rc). Check the network connection and try again." ;;
 		esac
 	else
-		curl -fsSL --proto '=https' -o "$dest" "$url" </dev/null || rc=$?
+		curl -fsSL --proto '=https' --connect-timeout 10 --retry 5 --retry-all-errors -o "$dest" "$url" </dev/null || rc=$?
 		case "$rc" in
 		0) return 0 ;;
 		60 | 77) die "the secure (HTTPS) connection to GitHub could not be verified. Run: apt install ca-certificates, then try again." ;;

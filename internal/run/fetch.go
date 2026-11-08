@@ -6,13 +6,26 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-var client = &http.Client{Timeout: 30 * time.Minute}
+// client gives up on an unreachable server quickly: the dial timeout is
+// split across a host's addresses, so one dead address (seen with one of
+// GitHub's) costs seconds, not minutes, before the next is tried.
+var client = &http.Client{
+	Timeout: 30 * time.Minute,
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 40 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: time.Minute,
+		ForceAttemptHTTP2:     true,
+	},
+}
 
 // Get fetches a URL over HTTPS into memory (at most max bytes).
 func (s *S) Get(url string, maxBytes int64) ([]byte, error) {

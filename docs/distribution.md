@@ -13,6 +13,7 @@ With sudo already working: `wget -qO- https://tinyurl.com/kilnsetup | sudo bash`
 - `https://tinyurl.com/kilnsetup` redirects to `https://github.com/satya-janghu/kiln/releases/latest/download/install.sh`, so it always gets the newest release's script. There's no website or GitHub Pages to maintain.
 - Typing `tinyurl.com/kilnsetup` without `https://` also works, but then the first request is plain HTTP and could be tampered with on the way. The script itself checks the binary's checksum, so typing `https://` protects the script.
 - To run kiln again, for example after fixing a failed item, type the one-liner again.
+- **If it seems stuck before anything prints:** the owner's home network can't reach one of GitHub's four download servers (`185.199.109.133`, seen 2026-11-08 from both the Mac and the test box). Plain wget then waits about 2 minutes on it before trying the next. `install.sh` and kiln use short connect timeouts with retries, so only the very first fetch can stall. `wget -T 10 -qO- https://tinyurl.com/kilnsetup | bash` avoids even that.
 
 ## install.sh
 
